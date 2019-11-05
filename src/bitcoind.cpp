@@ -43,10 +43,16 @@ const std::function<std::string(const char*)> G_TRANSLATION_FUN = nullptr;
  * Use the buttons <code>Namespaces</code>, <code>Classes</code> or <code>Files</code> at the top of the page to start navigating the code.
  */
 
+/* hzx reading this file in 20191029
+*   his target is to know the detail about the source code
+*   keep fighting~
+*
+*/
+
+
 static void WaitForShutdown()
 {
-    while (!ShutdownRequested())
-    {
+    while (!ShutdownRequested()) {
         MilliSleep(200);
     }
     Interrupt();
@@ -63,13 +69,13 @@ static bool AppInit(int argc, char* argv[])
 
     bool fRet = false;
 
-    util::ThreadRename("init");
+    util::ThreadRename("init"); // 设置线程名称 "Bitcoin Core"
 
     //
     // Parameters
     //
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
-    SetupServerArgs();
+    SetupServerArgs(); // 程序服务参数设置, 运行 "./bitcoind --help" 时出现的设置信息
     std::string error;
     if (!gArgs.ParseParameters(argc, argv, error)) {
         return InitError(strprintf("Error parsing command line arguments: %s\n", error));
@@ -79,12 +85,9 @@ static bool AppInit(int argc, char* argv[])
     if (HelpRequested(gArgs) || gArgs.IsArgSet("-version")) {
         std::string strUsage = PACKAGE_NAME " version " + FormatFullVersion() + "\n";
 
-        if (gArgs.IsArgSet("-version"))
-        {
+        if (gArgs.IsArgSet("-version")) {
             strUsage += FormatParagraph(LicenseInfo()) + "\n";
-        }
-        else
-        {
+        } else {
             strUsage += "\nUsage:  bitcoind [options]                     Start " PACKAGE_NAME "\n";
             strUsage += "\n" + gArgs.GetHelpMessage();
         }
@@ -93,8 +96,7 @@ static bool AppInit(int argc, char* argv[])
         return true;
     }
 
-    try
-    {
+    try {
         if (!CheckDataDirOption()) {
             return InitError(strprintf("Specified data directory \"%s\" does not exist.\n", gArgs.GetArg("-datadir", "")));
         }
@@ -120,23 +122,19 @@ static bool AppInit(int argc, char* argv[])
         // Set this early so that parameter interactions go to console
         InitLogging();
         InitParameterInteraction();
-        if (!AppInitBasicSetup())
-        {
+        if (!AppInitBasicSetup()) {
             // InitError will have been called with detailed error, which ends up on console
             return false;
         }
-        if (!AppInitParameterInteraction())
-        {
+        if (!AppInitParameterInteraction()) {
             // InitError will have been called with detailed error, which ends up on console
             return false;
         }
-        if (!AppInitSanityChecks())
-        {
+        if (!AppInitSanityChecks()) {
             // InitError will have been called with detailed error, which ends up on console
             return false;
         }
-        if (gArgs.GetBoolArg("-daemon", false))
-        {
+        if (gArgs.GetBoolArg("-daemon", false)) {
 #if HAVE_DECL_DAEMON
 #if defined(MAC_OSX)
 #pragma GCC diagnostic push
@@ -156,21 +154,18 @@ static bool AppInit(int argc, char* argv[])
 #endif // HAVE_DECL_DAEMON
         }
         // Lock data directory after daemonization
-        if (!AppInitLockDataDirectory())
-        {
+        if (!AppInitLockDataDirectory()) {
             // If locking the data directory failed, exit immediately
             return false;
         }
         fRet = AppInitMain(interfaces);
-    }
-    catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         PrintExceptionContinue(&e, "AppInit()");
     } catch (...) {
         PrintExceptionContinue(nullptr, "AppInit()");
     }
 
-    if (!fRet)
-    {
+    if (!fRet) {
         Interrupt();
     } else {
         WaitForShutdown();
@@ -186,7 +181,7 @@ int main(int argc, char* argv[])
     util::WinCmdLineArgs winArgs;
     std::tie(argc, argv) = winArgs.get();
 #endif
-    SetupEnvironment();
+    SetupEnvironment(); // 启动时检测系统,对不同操作系统设置不同参数
 
     // Connect bitcoind signal handlers
     noui_connect();

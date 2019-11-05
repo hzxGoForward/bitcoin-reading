@@ -16,6 +16,16 @@
 #include <boost/signals2/signal.hpp>
 
 /** Store connections so we can disconnect them when suppressing output */
+// description about boost::signals2::connection noui_ThreadSafeMessageBoxConn
+/*
+https://www.boost.org/doc/libs/1_46_1/doc/html/boost/signals2/connection.html
+
+* The signals2::connection class represents a connection between a Signal and a Slot. 
+
+* It is a lightweight object that has the ability to query whether the signal and slot are currently connected,
+* and to disconnect the signal and slot. It is always safe to query or disconnect a connection.
+
+*/
 boost::signals2::connection noui_ThreadSafeMessageBoxConn;
 boost::signals2::connection noui_ThreadSafeQuestionConn;
 boost::signals2::connection noui_InitMessageConn;

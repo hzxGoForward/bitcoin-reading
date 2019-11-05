@@ -36,9 +36,9 @@
 #endif
 
 /** Expiration time for orphan transactions in seconds */
-static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
+static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60; // orphan tx 最多存在20分钟
 /** Minimum time between orphan transactions expire time checks in seconds */
-static constexpr int64_t ORPHAN_TX_EXPIRE_INTERVAL = 5 * 60;
+static constexpr int64_t ORPHAN_TX_EXPIRE_INTERVAL = 5 * 60; // 每5分钟检查一下orphan tx是否超时
 /** Headers download timeout expressed in microseconds
  *  Timeout = base + per_header * (expected number of headers) */
 static constexpr int64_t HEADERS_DOWNLOAD_TIMEOUT_BASE = 15 * 60 * 1000000; // 15 minutes
@@ -48,7 +48,7 @@ static constexpr int64_t HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER = 1000;        // 1
  */
 static constexpr int32_t MAX_OUTBOUND_PEERS_TO_PROTECT_FROM_DISCONNECT = 4;
 /** Timeout for (unprotected) outbound peers to sync to our chainwork, in seconds */
-static constexpr int64_t CHAIN_SYNC_TIMEOUT = 20 * 60; // 20 minutes
+static constexpr int64_t CHAIN_SYNC_TIMEOUT = 20 * 60;
 /** How frequently to check for stale tips, in seconds */
 static constexpr int64_t STALE_CHECK_INTERVAL = 10 * 60; // 10 minutes hzx- every 10 minutes to check stale block
 /** How frequently to check for extra outbound peers and disconnect, in seconds */
@@ -64,23 +64,23 @@ static constexpr int STALE_RELAY_AGE_LIMIT = 30 * 24 * 60 * 60;
 /// limiting block relay. Set to one week, denominated in seconds.
 static constexpr int HISTORICAL_BLOCK_AGE = 7 * 24 * 60 * 60;
 /** Maximum number of in-flight transactions from a peer */
-static constexpr int32_t MAX_PEER_TX_IN_FLIGHT = 100;
+static constexpr int32_t MAX_PEER_TX_IN_FLIGHT = 100; // 从一个peer最多require100个tx
 /** Maximum number of announced transactions from a peer */
 static constexpr int32_t MAX_PEER_TX_ANNOUNCEMENTS = 2 * MAX_INV_SZ;
 /** How many microseconds to delay requesting transactions from inbound peers */
 static constexpr std::chrono::microseconds INBOUND_PEER_TX_DELAY{std::chrono::seconds{2}};
 /** How long to wait (in microseconds) before downloading a transaction from an additional peer */
-static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seconds{60}};
+static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seconds{60}}; // 一笔交易,请求的超时时间为60秒
 /** Maximum delay (in microseconds) for transaction requests to avoid biasing some peers over others. */
 static constexpr std::chrono::microseconds MAX_GETDATA_RANDOM_DELAY{std::chrono::seconds{2}};
 /** How long to wait (in microseconds) before expiring an in-flight getdata request to a peer */
-static constexpr std::chrono::microseconds TX_EXPIRY_INTERVAL{GETDATA_TX_INTERVAL * 10};
+static constexpr std::chrono::microseconds TX_EXPIRY_INTERVAL{GETDATA_TX_INTERVAL * 10}; // 10分钟过期getdata
 static_assert(INBOUND_PEER_TX_DELAY >= MAX_GETDATA_RANDOM_DELAY,
     "To preserve security, MAX_GETDATA_RANDOM_DELAY should not exceed INBOUND_PEER_DELAY");
 /** Limit to avoid sending big packets. Not used in processing incoming GETDATA for compatibility */
 static const unsigned int MAX_GETDATA_SZ = 1000;
 
-
+// orphan tx,除了包含一个正常的交易,还包括交易的来源,过期时间等
 struct COrphanTx {
     // When modifying, adapt the copy of this definition in tests/DoS_tests.
     CTransactionRef tx;
@@ -121,6 +121,8 @@ int nSyncStarted GUARDED_BY(cs_main) = 0;
      * messages or ban them when processing happens afterwards.
      * Set mapBlockSource[hash].second to false if the node should not be
      * punished if the block is invalid.
+     * 区块hash->(发送的节点编号, 是否punished?)kj
+     *
      */
 std::map<uint256, std::pair<NodeId, bool>> mapBlockSource GUARDED_BY(cs_main);
 
@@ -135,7 +137,7 @@ std::map<uint256, std::pair<NodeId, bool>> mapBlockSource GUARDED_BY(cs_main);
      * bandwidth increase. A flooding attacker attempting to roll-over the
      * filter using minimum-sized, 60byte, transactions might manage to send
      * 1000/sec if we have fast peers, so we pick 120,000 to give our peers a
-     * two minute window to send invs to us.
+     * two minute window to send invs to us. 120,000/60 = 2000
      *
      * Decreasing the false positive rate is fairly cheap, so we pick one in a
      * million to make it highly unlikely for users to have issues with this
@@ -358,7 +360,6 @@ struct CNodeState {
 
     //! Whether this peer is a manual connection
     bool m_is_manual_connection;
-
     CNodeState(CAddress addrIn, std::string addrNameIn, bool is_inbound, bool is_manual) : address(addrIn), name(std::move(addrNameIn)), m_is_inbound(is_inbound),
                                                                                            m_is_manual_connection(is_manual)
     {
@@ -392,6 +393,7 @@ struct CNodeState {
 limitedmap<uint256, std::chrono::microseconds> g_already_asked_for GUARDED_BY(cs_main)(MAX_INV_SZ);
 
 /** Map maintaining per-node state. */
+/*用来映射每个节点状态的map*/
 static std::map<NodeId, CNodeState> mapNodeState GUARDED_BY(cs_main);
 
 static CNodeState* State(NodeId pnode) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -407,6 +409,7 @@ static void UpdatePreferredDownload(CNode* node, CNodeState* state) EXCLUSIVE_LO
     nPreferredDownload -= state->fPreferredDownload;
 
     // Whether this node should be marked as a preferred download node.
+    // node 不是inbound,拥有权限, 不是oneShot,不是SPV节点
     state->fPreferredDownload = (!node->fInbound || node->HasPermission(PF_NOBAN)) && !node->fOneShot && !node->fClient;
 
     nPreferredDownload += state->fPreferredDownload;
@@ -455,7 +458,7 @@ static bool MarkBlockAsReceived(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs
         mapBlocksInFlight.erase(itInFlight);
         return true;
     }
-    return false;
+    return false; // 表明没有requested该block
 }
 
 // returns false, still setting pit, if the block was already in flight from the same peer
@@ -495,6 +498,7 @@ static bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const CBlock
 }
 
 /** Check whether the last unknown block a peer advertised is not yet known. */
+// 猜测这里的hashLastUnknownBlock 指的是上一次peer向本节点required的block的hash
 static void ProcessBlockAvailability(NodeId nodeid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     CNodeState* state = State(nodeid);
@@ -537,6 +541,10 @@ static void UpdateBlockAvailability(NodeId nodeid, const uint256& hash) EXCLUSIV
  * lNodesAnnouncingHeaderAndIDs, and keeping that list under a certain size by
  * removing the first element if necessary.
  */
+
+/*
+bip152参考: https://github.com/bitcoin/bips/blob/master/bip-0152.mediawiki#Abstract
+*/
 static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
@@ -546,6 +554,7 @@ static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connma
         return;
     }
     if (nodestate->fProvidesHeaderAndIDs) {
+        // for循环,找到这个节点,删除然后添加到尾部,这操作是为了什么?
         for (std::list<NodeId>::iterator it = lNodesAnnouncingHeaderAndIDs.begin(); it != lNodesAnnouncingHeaderAndIDs.end(); it++) {
             if (*it == nodeid) {
                 lNodesAnnouncingHeaderAndIDs.erase(it);
@@ -690,6 +699,7 @@ void EraseTxRequest(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     g_already_asked_for.erase(txid);
 }
 
+// 返回某个交易的request的时间
 std::chrono::microseconds GetTxRequestTime(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     auto it = g_already_asked_for.find(txid);
@@ -699,6 +709,10 @@ std::chrono::microseconds GetTxRequestTime(const uint256& txid) EXCLUSIVE_LOCKS_
     return {};
 }
 
+/*
+    如果该交易存在,更新request_time
+    如果不存在,插入request_time
+*/
 void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     auto it = g_already_asked_for.find(txid);
@@ -709,6 +723,7 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
     }
 }
 
+//
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     std::chrono::microseconds process_time;
@@ -777,7 +792,6 @@ void PeerLogicValidation::InitializeNode(CNode* pnode)
     if (!pnode->fInbound)
         PushNodeVersion(pnode, connman, GetTime());
 }
-
 void PeerLogicValidation::FinalizeNode(NodeId nodeid, bool& fUpdateConnectionTime)
 {
     fUpdateConnectionTime = false;
@@ -834,7 +848,8 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats)
 //
 // mapOrphanTransactions
 //
-
+// Extra transactions to keep in memory for compact block reconstructions
+// default is 100
 static void AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(g_cs_orphans)
 {
     size_t max_extra_txn = gArgs.GetArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
@@ -845,6 +860,7 @@ static void AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_L
     vExtraTxnForCompact[vExtraTxnForCompactIt] = std::make_pair(tx->GetWitnessHash(), tx);
     vExtraTxnForCompactIt = (vExtraTxnForCompactIt + 1) % max_extra_txn;
 }
+
 
 bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(g_cs_orphans)
 {
@@ -879,6 +895,7 @@ bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRE
     return true;
 }
 
+// 删除一个orphantx
 int static EraseOrphanTx(uint256 hash) EXCLUSIVE_LOCKS_REQUIRED(g_cs_orphans)
 {
     std::map<uint256, COrphanTx>::iterator it = mapOrphanTransactions.find(hash);
@@ -908,6 +925,7 @@ int static EraseOrphanTx(uint256 hash) EXCLUSIVE_LOCKS_REQUIRED(g_cs_orphans)
     return 1;
 }
 
+// 删除属于某个peer的orphan tx
 void EraseOrphansFor(NodeId peer)
 {
     LOCK(g_cs_orphans);
@@ -983,6 +1001,8 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
  * Returns true if the given validation state result may result in a peer
  * banning/disconnecting us. We use this to determine which unaccepted
  * transactions from a whitelisted peer that we can safely relay.
+ * 
+ * 暂时不理解, 先放着
  */
 static bool TxRelayMayResultInDisconnect(const CValidationState& state)
 {
@@ -3605,7 +3625,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     pindexStart = pindexStart->pprev;
                 
                 // hzx detail @ https://bitcoin.org/en/p2p-network-guide#headers-first 
-                
+
                 LogPrint(BCLog::NET, "initial getheaders (%d) to peer=%d (startheight:%d)\n", pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
                 connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
             }

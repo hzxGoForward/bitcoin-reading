@@ -641,18 +641,28 @@ public:
 
 
 /** Information about a peer */
+// 详细信息见 https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_4):_P2P_Network
+/*
+* At any given time, the node is connected with a set of other nodes, i.e. peers. 
+* By default the code connects to 8 outbound peers (nodes that our node goes out and finds) 
+* and allows up to 125 inbound peers (nodes that find us through the network).
+* Each peer is represented by a CNode
+* The CNode contains dozens of attributes, most of which have to do with low-level plumbing (sockets, byte streams, etc.)
+*
+*/
+
 class CNode
 {
     friend class CConnman;
 
 public:
     // socket
-    std::atomic<ServiceFlags> nServices{NODE_NONE};
+    std::atomic<ServiceFlags> nServices{NODE_NONE}; // 提供的服务,1表示全节点,0表示轻节点
     SOCKET hSocket GUARDED_BY(cs_hSocket);
     size_t nSendSize{0};   // total size of all vSendMsg entries
     size_t nSendOffset{0}; // offset inside the first vSendMsg already sent
     uint64_t nSendBytes GUARDED_BY(cs_vSend){0};
-    std::deque<std::vector<unsigned char>> vSendMsg GUARDED_BY(cs_vSend);
+    std::deque<std::vector<unsigned char>> vSendMsg GUARDED_BY(cs_vSend); // Messages that we've queued up to send to the peer.
     CCriticalSection cs_vSend;
     CCriticalSection cs_hSocket;
     CCriticalSection cs_vRecv;
@@ -694,7 +704,7 @@ public:
     bool m_manual_connection{false};
     bool fClient{false};        // set by version message
     bool m_limited_node{false}; //after BIP159, set by version message
-    const bool fInbound;
+    const bool fInbound;        // 是否是接入的连接
     std::atomic_bool fSuccessfullyConnected{false};
     // Setting fDisconnect to true will cause the node to be disconnected the
     // next time DisconnectNodes() runs
