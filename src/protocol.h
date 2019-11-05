@@ -284,10 +284,12 @@ enum ServiceFlags : uint64_t {
     NODE_BLOOM = (1 << 2),
     // NODE_WITNESS indicates that a node can be asked for blocks and transactions including
     // witness data.
+    // @ https://github.com/bitcoin/bips/blob/master/bip-0111.mediawiki
     NODE_WITNESS = (1 << 3),
     // NODE_NETWORK_LIMITED means the same as NODE_NETWORK with the limitation of only
     // serving the last 288 (2 day) blocks
     // See BIP159 for details on how this is implemented.
+    // @ https://github.com/bitcoin/bips/blob/master/bip-0159.mediawiki 
     NODE_NETWORK_LIMITED = (1 << 10),
 
     // Bits 24-31 are reserved for temporary experiments. Just pick a bit that

@@ -6,10 +6,10 @@
 #ifndef BITCOIN_NET_PROCESSING_H
 #define BITCOIN_NET_PROCESSING_H
 
-#include <net.h>
-#include <validationinterface.h>
 #include <consensus/params.h>
+#include <net.h>
 #include <sync.h>
+#include <validationinterface.h>
 
 extern CCriticalSection cs_main;
 
@@ -21,14 +21,16 @@ static const unsigned int DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN = 100;
 static constexpr bool DEFAULT_ENABLE_BIP61{false};
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
 
-class PeerLogicValidation final : public CValidationInterface, public NetEventsInterface {
+class PeerLogicValidation final : public CValidationInterface, public NetEventsInterface
+{
 private:
     CConnman* const connman;
     BanMan* const m_banman;
 
     bool SendRejectsAndCheckIfBanned(CNode* pnode, bool enable_bip61) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
 public:
-    PeerLogicValidation(CConnman* connman, BanMan* banman, CScheduler &scheduler, bool enable_bip61);
+    PeerLogicValidation(CConnman* connman, BanMan* banman, CScheduler& scheduler, bool enable_bip61);
 
     /**
      * Overridden from CValidationInterface.
@@ -37,7 +39,7 @@ public:
     /**
      * Overridden from CValidationInterface.
      */
-    void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) override;
+    void UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload) override;
     /**
      * Overridden from CValidationInterface.
      */
@@ -45,7 +47,7 @@ public:
     /**
      * Overridden from CValidationInterface.
      */
-    void NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& pblock) override;
+    void NewPoWValidBlock(const CBlockIndex* pindex, const std::shared_ptr<const CBlock>& pblock) override;
 
     /** Initialize a peer by adding it to mapNodeState and pushing a message requesting its version */
     void InitializeNode(CNode* pnode) override;
@@ -67,9 +69,11 @@ public:
     bool SendMessages(CNode* pto) override EXCLUSIVE_LOCKS_REQUIRED(pto->cs_sendProcessing);
 
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
-    void ConsiderEviction(CNode *pto, int64_t time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    void ConsiderEviction(CNode* pto, int64_t time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
     /** Evict extra outbound peers. If we think our tip may be stale, connect to an extra outbound */
-    void CheckForStaleTipAndEvictPeers(const Consensus::Params &consensusParams);
+    void CheckForStaleTipAndEvictPeers(const Consensus::Params& consensusParams);
+    
     /** If we have extra outbound peers, try to disconnect the one with the oldest block announcement */
     void EvictExtraOutboundPeers(int64_t time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
@@ -88,7 +92,7 @@ struct CNodeStateStats {
 };
 
 /** Get statistics from node state */
-bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
+bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats);
 
 /** Relay transaction to every node */
 void RelayTransaction(const uint256&, const CConnman& connman);

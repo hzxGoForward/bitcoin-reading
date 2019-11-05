@@ -50,7 +50,7 @@ static constexpr int32_t MAX_OUTBOUND_PEERS_TO_PROTECT_FROM_DISCONNECT = 4;
 /** Timeout for (unprotected) outbound peers to sync to our chainwork, in seconds */
 static constexpr int64_t CHAIN_SYNC_TIMEOUT = 20 * 60; // 20 minutes
 /** How frequently to check for stale tips, in seconds */
-static constexpr int64_t STALE_CHECK_INTERVAL = 10 * 60; // 10 minutes
+static constexpr int64_t STALE_CHECK_INTERVAL = 10 * 60; // 10 minutes hzx- every 10 minutes to check stale block
 /** How frequently to check for extra outbound peers and disconnect, in seconds */
 static constexpr int64_t EXTRA_PEER_CHECK_INTERVAL = 45;
 /** Minimum time an outbound-peer-eviction candidate must be connected for, in order to evict, in seconds */
@@ -3172,6 +3172,14 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     return true;
 }
 
+
+// hzx @ https://github.com/bitcoin/bips/blob/master/bip-0061.mediawiki
+/**
+ * It also gives SPV (simplified payment verification) clients a hint 
+ * that something may be wrong when their transactions are rejected due
+ * to insufficient priority or fees.
+ * 
+ */
 bool PeerLogicValidation::SendRejectsAndCheckIfBanned(CNode* pnode, bool enable_bip61) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
@@ -3185,7 +3193,7 @@ bool PeerLogicValidation::SendRejectsAndCheckIfBanned(CNode* pnode, bool enable_
     state.rejects.clear();
 
     if (state.fShouldBan) {
-        state.fShouldBan = false;
+        state.fShouldBan = false; // why set this to false?
         if (pnode->HasPermission(PF_NOBAN))
             LogPrintf("Warning: not punishing whitelisted peer %s!\n", pnode->addr.ToString());
         else if (pnode->m_manual_connection)
@@ -3496,6 +3504,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             return true;
 
         // If we get here, the outgoing message serialization version is set and can't change.
+        // hzx get sending versions
         const CNetMsgMaker msgMaker(pto->GetSendVersion());
 
         //
@@ -3506,6 +3515,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             // RPC ping request by user
             pingSend = true;
         }
+        // hzx nPingUsecStart denote last time we sent ping, if it is 0, means never send ping message
         if (pto->nPingNonceSent == 0 && pto->nPingUsecStart + PING_INTERVAL * 1000000 < GetTimeMicros()) {
             // Ping automatically sent as a latency probe & keepalive.
             pingSend = true;
@@ -3513,11 +3523,13 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         if (pingSend) {
             uint64_t nonce = 0;
             while (nonce == 0) {
+                // hzx randomly get a nonce
                 GetRandBytes((unsigned char*)&nonce, sizeof(nonce));
             }
             pto->fPingQueued = false;
             pto->nPingUsecStart = GetTimeMicros();
             if (pto->nVersion > BIP0031_VERSION) {
+                // hzx @ https://github.com/bitcoin/bips/blob/master/bip-0031.mediawiki
                 pto->nPingNonceSent = nonce;
                 connman->PushMessage(pto, msgMaker.Make(NetMsgType::PING, nonce));
             } else {
@@ -3530,7 +3542,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         TRY_LOCK(cs_main, lockMain); // Acquire cs_main for IsInitialBlockDownload() and CNodeState()
         if (!lockMain)
             return true;
-
+        // hzx send reject message and if banned the node, return.
         if (SendRejectsAndCheckIfBanned(pto, m_enable_bip61)) return true;
         CNodeState& state = *State(pto->GetId());
 
@@ -3538,12 +3550,15 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         int64_t nNow = GetTimeMicros();
         if (pto->IsAddrRelayPeer() && !::ChainstateActive().IsInitialBlockDownload() && pto->nNextLocalAddrSend < nNow) {
             AdvertiseLocal(pto);
+            // hzx nNextLocalAddrSend means next time to send my address.
             pto->nNextLocalAddrSend = PoissonNextSend(nNow, AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL);
         }
 
         //
         // Message: addr
         //
+        // hzx @ https://bitcoin.org/en/developer-reference#addr
+        // hzx 向peer发送已知的peer信息
         if (pto->IsAddrRelayPeer() && pto->nNextAddrSend < nNow) {
             pto->nNextAddrSend = PoissonNextSend(nNow, AVG_ADDRESS_BROADCAST_INTERVAL);
             std::vector<CAddress> vAddr;
@@ -3561,13 +3576,14 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             }
             pto->vAddrToSend.clear();
             if (!vAddr.empty())
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr));
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr));// 剩余地址不超过1000个,也需要发送
             // we only send the big addr message once
             if (pto->vAddrToSend.capacity() > 40)
                 pto->vAddrToSend.shrink_to_fit();
         }
 
         // Start block sync
+        // hzx 
         if (pindexBestHeader == nullptr)
             pindexBestHeader = ::ChainActive().Tip();
         bool fFetch = state.fPreferredDownload || (nPreferredDownload == 0 && !pto->fClient && !pto->fOneShot); // Download if this is a nice peer, or we have no nice peers and this one might do.
@@ -3587,6 +3603,9 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                    got back an empty response.  */
                 if (pindexStart->pprev)
                     pindexStart = pindexStart->pprev;
+                
+                // hzx detail @ https://bitcoin.org/en/p2p-network-guide#headers-first 
+                
                 LogPrint(BCLog::NET, "initial getheaders (%d) to peer=%d (startheight:%d)\n", pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
                 connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
             }
