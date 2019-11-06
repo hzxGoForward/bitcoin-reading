@@ -132,7 +132,7 @@ private:
     int nEntriesThisGeneration;
     int nGeneration;
     std::vector<uint64_t> data;
-    unsigned int nTweak;
+    unsigned int nTweak;  // hzx nTweak is set to a cryptographically secure random value for you.
     int nHashFuncs;
 };
 

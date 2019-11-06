@@ -5,8 +5,6 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "cpp build active file",
-            "command": "/usr/bin/cpp",
             "label": "clang++ build active file",
             "command": "/usr/bin/clang++",
             "args": [

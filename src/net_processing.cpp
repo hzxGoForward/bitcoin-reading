@@ -596,6 +596,7 @@ static bool CanDirectFetch(const Consensus::Params& consensusParams) EXCLUSIVE_L
     return ::ChainActive().Tip()->GetBlockTime() > GetAdjustedTime() - consensusParams.nPowTargetSpacing * 20;
 }
 
+// hzx, 判断peer wheter have this block
 static bool PeerHasHeader(CNodeState* state, const CBlockIndex* pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     if (state->pindexBestKnownBlock && pindex == state->pindexBestKnownBlock->GetAncestor(pindex->nHeight))
@@ -723,7 +724,8 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
     }
 }
 
-//
+// hzx 重新设置一笔交易的请求时间
+// 在上次请求的时间上延长60秒, 随机+[0,2]秒的延迟,如果是inbound,再加2秒延迟 
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     std::chrono::microseconds process_time;
@@ -3515,6 +3517,7 @@ public:
 };
 } // namespace
 
+// hzx 所有由本方发出的Message,这里指向特定peer发送信息
 bool PeerLogicValidation::SendMessages(CNode* pto)
 {
     const Consensus::Params& consensusParams = Params().GetConsensus();
@@ -3596,14 +3599,14 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             }
             pto->vAddrToSend.clear();
             if (!vAddr.empty())
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr));// 剩余地址不超过1000个,也需要发送
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr)); // 剩余地址不超过1000个,也需要发送
             // we only send the big addr message once
             if (pto->vAddrToSend.capacity() > 40)
                 pto->vAddrToSend.shrink_to_fit();
         }
 
         // Start block sync
-        // hzx 
+        // hzx
         if (pindexBestHeader == nullptr)
             pindexBestHeader = ::ChainActive().Tip();
         bool fFetch = state.fPreferredDownload || (nPreferredDownload == 0 && !pto->fClient && !pto->fOneShot); // Download if this is a nice peer, or we have no nice peers and this one might do.
@@ -3623,8 +3626,9 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                    got back an empty response.  */
                 if (pindexStart->pprev)
                     pindexStart = pindexStart->pprev;
-                
-                // hzx detail @ https://bitcoin.org/en/p2p-network-guide#headers-first 
+
+                // hzx detail @ https://bitcoin.org/en/p2p-network-guide#headers-first
+                // 对方一次性传递2000个block
 
                 LogPrint(BCLog::NET, "initial getheaders (%d) to peer=%d (startheight:%d)\n", pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
                 connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
@@ -3644,6 +3648,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             // add all to the inv queue.
             LOCK(pto->cs_inventory);
             std::vector<CBlock> vHeaders;
+            // hzx, the peer no preferHeaders, no preferHeaderAndIDs, noasdf
             bool fRevertToInv = ((!state.fPreferHeaders &&
                                      (!state.fPreferHeaderAndIDs || pto->vBlockHashesToAnnounce.size() > 1)) ||
                                  pto->vBlockHashesToAnnounce.size() > MAX_BLOCKS_TO_ANNOUNCE);
@@ -3658,6 +3663,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 for (const uint256& hash : pto->vBlockHashesToAnnounce) {
                     const CBlockIndex* pindex = LookupBlockIndex(hash);
                     assert(pindex);
+                    // hzx 不理解这里什么意思~
                     if (::ChainActive()[pindex->nHeight] != pindex) {
                         // Bail out if we reorged away from this block
                         fRevertToInv = true;
@@ -3786,6 +3792,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     vInv.clear();
                 }
             }
+            // hzx 这段最后会把多余的vInv信息处理掉
             pto->vInventoryBlockToSend.clear();
 
             if (pto->m_tx_relay != nullptr) {
@@ -3809,13 +3816,18 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 }
 
                 // Respond to BIP35 mempool requests
+                // hzx 将memopool交易信息发送给peer,根据对方的filter筛选以及费率请求筛选掉不必要的交易
+                // bip35 具体内容详细参考: https://github.com/bitcoin/bips/blob/master/bip-0035.mediawiki
+                // 1. SPV 客户端希望获取0确认的交易是否被发送或者收到了
+                // 2. 矿工先下载所有交易,然后重启自身,防止丢失交易
+                // 3. 远程网络诊断
                 if (fSendTrickle && pto->m_tx_relay->fSendMempool) {
                     auto vtxinfo = mempool.infoAll();
                     pto->m_tx_relay->fSendMempool = false;
                     CAmount filterrate = 0;
                     {
                         LOCK(pto->m_tx_relay->cs_feeFilter);
-                        filterrate = pto->m_tx_relay->minFeeFilter;
+                        filterrate = pto->m_tx_relay->minFeeFilter; // hzx 看起来有些peer需要tx的时候对feerate进行筛选
                     }
 
                     LOCK(pto->m_tx_relay->cs_filter);
@@ -3829,7 +3841,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                                 continue;
                         }
                         if (pto->m_tx_relay->pfilter) {
-                            if (!pto->m_tx_relay->pfilter->IsRelevantAndUpdate(*txinfo.tx)) continue;
+                            if (!pto->m_tx_relay->pfilter->IsRelevantAndUpdate(*txinfo.tx)) continue; // hzx 交易在对方filter中,跳过
                         }
                         pto->m_tx_relay->filterInventoryKnown.insert(hash);
                         vInv.push_back(inv);
@@ -3838,10 +3850,13 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                             vInv.clear();
                         }
                     }
+                    // hzx BUG, 循环结束,如果vInv 不为空,这不是bug?, 这一段的最后,把vInv全部push_message的操作,不是bug
+
                     pto->m_tx_relay->timeLastMempoolReq = GetTime();
                 }
 
                 // Determine transactions to relay
+                // hzx 如果有交易还需要发送,继续发送
                 if (fSendTrickle) {
                     // Produce a vector with all candidates for sending
                     std::vector<std::set<uint256>::iterator> vInvTx;
@@ -4032,11 +4047,11 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 // If this transaction was last requested more than 1 minute ago,
                 // then request.
                 const auto last_request_time = GetTxRequestTime(inv.hash);
-                if (last_request_time <= current_time - GETDATA_TX_INTERVAL) {
+                if (last_request_time <= current_time - GETDATA_TX_INTERVAL) { // hzx request一笔交易的间隔超过1分钟,可以再次持续请求
                     LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
                     vGetData.push_back(inv);
                     if (vGetData.size() >= MAX_GETDATA_SZ) {
-                        connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                        connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));        // hzx 发送信息
                         vGetData.clear();
                     }
                     UpdateTxRequestTime(inv.hash, current_time);
@@ -4051,6 +4066,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 }
             } else {
                 // We have already seen this transaction, no need to download.
+                // hzx 删除相应的tx
                 state.m_tx_download.m_tx_announced.erase(inv.hash);
                 state.m_tx_download.m_tx_in_flight.erase(inv.hash);
             }
@@ -4058,7 +4074,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
 
         if (!vGetData.empty())
-            connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+            connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));        // hzx 发送信息
 
         //
         // Message: feefilter
@@ -4075,7 +4091,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 // We always have a fee filter of at least minRelayTxFee
                 filterToSend = std::max(filterToSend, ::minRelayTxFee.GetFeePerK());
                 if (filterToSend != pto->m_tx_relay->lastSentFeeFilter) {
-                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend));
+                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend));// HZX 更新新的费率过滤
                     pto->m_tx_relay->lastSentFeeFilter = filterToSend;
                 }
                 pto->m_tx_relay->nextSendTimeFeeFilter = PoissonNextSend(timeNow, AVG_FEEFILTER_BROADCAST_INTERVAL);
