@@ -725,7 +725,7 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
 }
 
 // hzx 重新设置一笔交易的请求时间
-// 在上次请求的时间上延长60秒, 随机+[0,2]秒的延迟,如果是inbound,再加2秒延迟 
+// 在上次请求的时间上延长60秒, 随机+[0,2]秒的延迟,如果是inbound,再加2秒延迟
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     std::chrono::microseconds process_time;
@@ -1510,6 +1510,9 @@ void static ProcessGetBlockData(CNode* pfrom, const CChainParams& chainparams, c
     }
 }
 
+// hzx  主要用于发送tx
+// hzx  发送block
+// hzx  发送notfound 命令
 void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnman* connman, const std::atomic<bool>& interruptMsgProc) LOCKS_EXCLUDED(cs_main)
 {
     AssertLockNotHeld(cs_main);
@@ -1529,7 +1532,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
             if (interruptMsgProc)
                 return;
             // Don't bother if send buffer is too full to respond anyway
-            if (pfrom->fPauseSend)
+            if (pfrom->fPauseSend) // hzx 这里指的是本地向pfrom发送的buffer已经满了,暂时不发送信息
                 break;
 
             const CInv& inv = *it;
@@ -1546,6 +1549,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
                 auto txinfo = mempool.info(inv.hash);
                 // To protect privacy, do not answer getdata using the mempool when
                 // that TX couldn't have been INVed in reply to a MEMPOOL request.
+                // 请求一笔交易,如果不在mapRelay中时,只有该交易的请求时间在请求本节点mempool之前时才会发送
                 if (txinfo.tx && txinfo.nTime <= pfrom->m_tx_relay->timeLastMempoolReq) {
                     connman->PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::TX, *txinfo.tx));
                     push = true;
@@ -1561,7 +1565,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
         const CInv& inv = *it;
         if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK) {
             it++;
-            ProcessGetBlockData(pfrom, chainparams, inv, connman);
+            ProcessGetBlockData(pfrom, chainparams, inv, connman); // 根据inv发送区块
         }
     }
 
@@ -1800,6 +1804,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
     return true;
 }
 
+// 对orphan tx的处理
 void static ProcessOrphanTx(CConnman* connman, std::set<uint256>& orphan_work_set, std::list<CTransactionRef>& removed_txn) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_cs_orphans)
 {
     AssertLockHeld(cs_main);
@@ -1822,7 +1827,7 @@ void static ProcessOrphanTx(CConnman* connman, std::set<uint256>& orphan_work_se
         // that relayed the previous transaction).
         CValidationState orphan_state;
 
-        if (setMisbehaving.count(fromPeer)) continue;
+        if (setMisbehaving.count(fromPeer)) continue; // hzx 如果该人已经发过,则跳过,啥意思?
         if (AcceptToMemoryPool(mempool, orphan_state, porphanTx, &fMissingInputs2, &removed_txn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             LogPrint(BCLog::MEMPOOL, "   accepted orphan tx %s\n", orphanHash.ToString());
             RelayTransaction(orphanHash, *connman);
@@ -3241,7 +3246,7 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
     const CChainParams& chainparams = Params();
     //
     // Message format
-    //  (4) message start
+    //  (4) message start -------------hzx  f9beb4d9
     //  (12) command
     //  (4) size
     //  (4) checksum
@@ -4051,7 +4056,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
                     vGetData.push_back(inv);
                     if (vGetData.size() >= MAX_GETDATA_SZ) {
-                        connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));        // hzx 发送信息
+                        connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData)); // hzx 发送信息
                         vGetData.clear();
                     }
                     UpdateTxRequestTime(inv.hash, current_time);
@@ -4074,7 +4079,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
 
         if (!vGetData.empty())
-            connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));        // hzx 发送信息
+            connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData)); // hzx 发送信息
 
         //
         // Message: feefilter
@@ -4091,7 +4096,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 // We always have a fee filter of at least minRelayTxFee
                 filterToSend = std::max(filterToSend, ::minRelayTxFee.GetFeePerK());
                 if (filterToSend != pto->m_tx_relay->lastSentFeeFilter) {
-                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend));// HZX 更新新的费率过滤
+                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend)); // HZX 更新新的费率过滤
                     pto->m_tx_relay->lastSentFeeFilter = filterToSend;
                 }
                 pto->m_tx_relay->nextSendTimeFeeFilter = PoissonNextSend(timeNow, AVG_FEEFILTER_BROADCAST_INTERVAL);
