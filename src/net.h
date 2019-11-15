@@ -772,6 +772,7 @@ public:
     };
 
     /** m_tx_relay == nullptr if we're not relaying transactions with this peer */
+    // hzx m_tx_relay 指针为空,表明只转发区块,不转发交易.
     std::unique_ptr<TxRelay> m_tx_relay;
 
     // Used for headers announcements - unfiltered blocks to relay

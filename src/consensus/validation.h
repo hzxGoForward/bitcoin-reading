@@ -95,6 +95,7 @@ inline bool IsBlockReason(ValidationInvalidReason r)
 }
 
 /** Capture information about block/transaction validation */
+// hzx CValidationState专门用于记录一个区块或者交易的检查状态.
 class CValidationState {
 private:
     enum mode_state {

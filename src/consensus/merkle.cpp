@@ -42,14 +42,16 @@
 */
 
 
-uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated) {
+uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated)
+{
     bool mutation = false;
     while (hashes.size() > 1) {
         if (mutated) {
             for (size_t pos = 0; pos + 1 < hashes.size(); pos += 2) {
-                if (hashes[pos] == hashes[pos + 1]) mutation = true;
+                if (hashes[pos] == hashes[pos + 1]) mutation = true; // 如果交易中前后重复,mutation为true.
             }
         }
+        // hashes 中交易个数为偶数,将最后一个复制一次.
         if (hashes.size() & 1) {
             hashes.push_back(hashes.back());
         }
@@ -82,4 +84,3 @@ uint256 BlockWitnessMerkleRoot(const CBlock& block, bool* mutated)
     }
     return ComputeMerkleRoot(std::move(leaves), mutated);
 }
-

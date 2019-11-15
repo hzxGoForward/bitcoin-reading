@@ -1875,7 +1875,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         return true;
     }
 
-
+    // hzx filterload 介绍
+    // The filterload message tells the receiving peer to filter all relayed transactions
+    // and requested merkle blocks through the provided filter. This allows clients to
+    // receive transactions relevant to their wallet plus a configurable rate of false
+    // positive transactions which can provide plausible-deniability privacy.
+    // 如果是超过NO_BLOOM_VERSION的client,如果继续发送filter,则增加其misbehaving score
+    // 如果是没有超过的版本,直接与其断开连接
     if (!(pfrom->GetLocalServices() & NODE_BLOOM) &&
         (strCommand == NetMsgType::FILTERLOAD ||
             strCommand == NetMsgType::FILTERADD)) {
@@ -2000,9 +2006,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         pfrom->nStartingHeight = nStartingHeight;
 
         // set nodes not relaying blocks and tx and not serving (parts) of the historical blockchain as "clients"
+        // hzx, 不转发区块,不转发交易,也不提供服务的节点,标记为client
         pfrom->fClient = (!(nServices & NODE_NETWORK) && !(nServices & NODE_NETWORK_LIMITED));
 
         // set nodes not capable of serving the complete blockchain history as "limited nodes"
+        // 只提供2天以内的区块服务的节点
         pfrom->m_limited_node = (!(nServices & NODE_NETWORK) && (nServices & NODE_NETWORK_LIMITED));
 
         if (pfrom->m_tx_relay != nullptr) {
@@ -2084,7 +2092,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
     // At this point, the outgoing message serialization version can't change.
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
-
+    /*
+    * The verack message acknowledges a previously-received version message, 
+    * informing the connecting node that it can begin to send other messages. 
+    * The verack message has no payload; for an example of a message with no payload, 
+    * 
+    * VERACK 信息不携带其他任何数据
+    */
     if (strCommand == NetMsgType::VERACK) {
         pfrom->SetRecvVersion(std::min(pfrom->nVersion.load(), PROTOCOL_VERSION));
 
@@ -2111,7 +2125,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // cmpctblock messages.
             // We send this to non-NODE NETWORK peers as well, because
             // they may wish to request compact blocks from us
-            bool fAnnounceUsingCMPCTBLOCK = false;
+            // hzx 详情查看 https://bitcoin.org/en/developer-reference#cmpctblock
+            // hzx Version 1 的compact 是 pre-segwit(txids), version 2 的compact 区块是post-segwit(wtxids)
+            bool fAnnounceUsingCMPCTBLOCK = false; // 该变量表示是否支持接收压缩区块.
             uint64_t nCMPCTBLOCKVersion = 2;
             if (pfrom->GetLocalServices() & NODE_WITNESS)
                 connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
@@ -2128,7 +2144,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
-
+    // hzx 向我方发送它的连接信息
     if (strCommand == NetMsgType::ADDR) {
         std::vector<CAddress> vAddr;
         vRecv >> vAddr;
@@ -2139,7 +2155,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (!pfrom->IsAddrRelayPeer()) {
             return true;
         }
-        if (vAddr.size() > 1000) {
+        if (vAddr.size() > 1000) { // 发送超过1000个addr,直接惩罚值+20
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20, strprintf("message addr size() = %u", vAddr.size()));
             return false;
@@ -2166,7 +2182,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             bool fReachable = IsReachable(addr);
             if (addr.nTime > nSince && !pfrom->fGetAddr && vAddr.size() <= 10 && addr.IsRoutable()) {
                 // Relay to a limited number of other nodes
-                RelayAddress(addr, fReachable, connman);
+                RelayAddress(addr, fReachable, connman); // 继续将这个地址扩散
             }
             // Do not store addresses outside our network
             if (fReachable)
@@ -2959,7 +2975,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             mapBlockSource.emplace(hash, std::make_pair(pfrom->GetId(), true));
         }
         bool fNewBlock = false;
-        ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock);
+        ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock); // ProcessNewBlock 处理是否为过期区块
         if (fNewBlock) {
             pfrom->nLastBlockTime = GetTime();
         } else {
