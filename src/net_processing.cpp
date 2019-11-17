@@ -70,7 +70,7 @@ static constexpr int32_t MAX_PEER_TX_ANNOUNCEMENTS = 2 * MAX_INV_SZ;
 /** How many microseconds to delay requesting transactions from inbound peers */
 static constexpr std::chrono::microseconds INBOUND_PEER_TX_DELAY{std::chrono::seconds{2}};
 /** How long to wait (in microseconds) before downloading a transaction from an additional peer */
-static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seconds{60}}; // 一笔交易,请求的超时时间为60秒
+static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seconds{60}}; // 同一笔交易,请求的时间间隔为60秒
 /** Maximum delay (in microseconds) for transaction requests to avoid biasing some peers over others. */
 static constexpr std::chrono::microseconds MAX_GETDATA_RANDOM_DELAY{std::chrono::seconds{2}};
 /** How long to wait (in microseconds) before expiring an in-flight getdata request to a peer */
@@ -731,6 +731,7 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     std::chrono::microseconds process_time;
     const auto last_request_time = GetTxRequestTime(txid);
     // First time requesting this tx
+    // hzx 如果从来没有要求过这个tx, 则直接ask
     if (last_request_time.count() == 0) {
         process_time = current_time;
     } else {

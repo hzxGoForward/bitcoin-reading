@@ -42,7 +42,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
                 return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-inputs-duplicate");
         }
     }
-
+    // hzx 验证数据大小超出范围问题
     if (tx.IsCoinBase()) {
         if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100)
             return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-cb-length");

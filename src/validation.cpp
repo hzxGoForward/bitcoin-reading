@@ -477,6 +477,8 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     // Check for conflicts with in-memory transactions
     std::set<uint256> setConflicts;
     for (const CTxIn& txin : tx.vin) {
+        // hzx 针对每一个tx的vin的prevout,寻找与其冲突的交易
+        // hzx 如果收到一笔完全一样的交易,该如何?
         const CTransaction* ptxConflicting = pool.GetConflictTx(txin.prevout);
         if (ptxConflicting) {
             if (!setConflicts.count(ptxConflicting->GetHash())) {
@@ -493,12 +495,18 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
                 // unconfirmed ancestors anyway; doing otherwise is hopelessly
                 // insecure.
                 bool fReplacementOptOut = true;
+                // hzx 如果这笔交易的任意一个输入的nsequence number是小于 0xffffffff(4294967294), 则标记该交易是可替代的.
+                // 详情参考: https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki
                 for (const CTxIn& _txin : ptxConflicting->vin) {
                     if (_txin.nSequence <= MAX_BIP125_RBF_SEQUENCE) {
                         fReplacementOptOut = false;
                         break;
                     }
                 }
+
+                // hzx ptxConflicting中所有的txin的sequence 为4294967294, 即该交易不可替换
+                // hzx 交易替换规则是, sequence number 更大的可以替换更小的.
+                // hzx 如果发现交易违规,不能替换,则拒绝该交易
                 if (fReplacementOptOut) {
                     return state.Invalid(ValidationInvalidReason::TX_MEMPOOL_POLICY, false, REJECT_DUPLICATE, "txn-mempool-conflict");
                 }
@@ -513,12 +521,13 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         CCoinsViewCache view(&dummy);
 
         LockPoints lp;
-        CCoinsViewCache& coins_cache = ::ChainstateActive().CoinsTip();
+        CCoinsViewCache& coins_cache = ::ChainstateActive().CoinsTip(); // 获取当前最长链的utxo集合
         CCoinsViewMemPool viewMemPool(&coins_cache, pool);
         view.SetBackend(viewMemPool);
 
         // do all inputs exist?
         for (const CTxIn& txin : tx.vin) {
+            // hzx 如果当前utxo中没找到这个txo, 放入uncache中
             if (!coins_cache.HaveCoinInCache(txin.prevout)) {
                 coins_to_uncache.push_back(txin.prevout);
             }
@@ -526,15 +535,18 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             // Note: this call may add txin.prevout to the coins cache
             // (CoinsTip().cacheCoins) by way of FetchCoin(). It should be removed
             // later (via coins_to_uncache) if this tx turns out to be invalid.
+            // 如果在mempool中也没找到这个引用的prevout的情况
             if (!view.HaveCoin(txin.prevout)) {
                 // Are inputs missing because we already have the tx?
                 for (size_t out = 0; out < tx.vout.size(); out++) {
                     // Optimistically just do efficient check of cache for outputs
+                    // hzx,这里猜测一下,这笔交易的utxo没找到,但是已经被花费的txo中找到了这笔交易,说明这笔交易在区块中并且被打包过了
                     if (coins_cache.HaveCoinInCache(COutPoint(hash, out))) {
                         return state.Invalid(ValidationInvalidReason::TX_CONFLICT, false, REJECT_DUPLICATE, "txn-already-known");
                     }
                 }
                 // Otherwise assume this might be an orphan tx for which we just haven't seen parents yet
+                // 这笔交易也没有已有的区块中花费过,但是就是找不到对应的input,有可能是orphanTx
                 if (pfMissingInputs) {
                     *pfMissingInputs = true;
                 }
@@ -899,7 +911,7 @@ static bool AcceptToMemoryPoolWithTime(const CChainParams& chainparams, CTxMemPo
     ::ChainstateActive().FlushStateToDisk(chainparams, stateDummy, FlushStateMode::PERIODIC);
     return res;
 }
-
+// hzx 检测一个tx是否该被加入mempool中去
 bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransactionRef& tx, bool* pfMissingInputs, std::list<CTransactionRef>* plTxnReplaced, bool bypass_limits, const CAmount nAbsurdFee, bool test_accept)
 {
     const CChainParams& chainparams = Params();
