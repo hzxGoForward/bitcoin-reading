@@ -3,11 +3,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+// hzx 已阅
 #include <primitives/block.h>
 
+#include <crypto/common.h>
 #include <hash.h>
 #include <tinyformat.h>
-#include <crypto/common.h>
 
 uint256 CBlockHeader::GetHash() const
 {

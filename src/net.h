@@ -715,7 +715,7 @@ public:
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
-    std::atomic_bool fPauseSend{false}; 
+    std::atomic_bool fPauseSend{false};
 
 protected:
     mapMsgCmdSize mapSendBytesPerMsgCmd;
@@ -779,7 +779,7 @@ public:
     std::vector<uint256> vBlockHashesToAnnounce GUARDED_BY(cs_inventory);
 
     // Block and TXN accept times
-    std::atomic<int64_t> nLastBlockTime{0};
+    std::atomic<int64_t> nLastBlockTime{0}; // 上一次发送的区块的时间戳
     std::atomic<int64_t> nLastTXTime{0};
 
     // Ping time measurement:

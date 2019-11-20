@@ -1,6 +1,7 @@
 // Copyright (c) 2015-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+// hzx schduler reading...
 
 #ifndef BITCOIN_SCHEDULER_H
 #define BITCOIN_SCHEDULER_H
@@ -43,7 +44,7 @@ public:
     typedef std::function<void()> Function;
 
     // Call func at/after time t
-    void schedule(Function f, boost::chrono::system_clock::time_point t=boost::chrono::system_clock::now());
+    void schedule(Function f, boost::chrono::system_clock::time_point t = boost::chrono::system_clock::now());
 
     // Convenience method: call f once deltaMilliSeconds from now
     void scheduleFromNow(Function f, int64_t deltaMilliSeconds);
@@ -64,18 +65,28 @@ public:
     // Tell any threads running serviceQueue to stop as soon as they're
     // done servicing whatever task they're currently servicing (drain=false)
     // or when there is no work left to be done (drain=true)
-    void stop(bool drain=false);
+    void stop(bool drain = false);
 
     // Returns number of tasks waiting to be serviced,
     // and first and last task times
-    size_t getQueueInfo(boost::chrono::system_clock::time_point &first,
-                        boost::chrono::system_clock::time_point &last) const;
+    size_t getQueueInfo(boost::chrono::system_clock::time_point& first,
+        boost::chrono::system_clock::time_point& last) const;
 
     // Returns true if there are threads actively running in serviceQueue()
     bool AreThreadsServicingQueue() const;
 
 private:
+    // hzx std::multimap<string,int> people={{"Ann", 25}, {"Ann", 14}, {"Bob",8}};
     std::multimap<boost::chrono::system_clock::time_point, Function> taskQueue;
+    // hzx condition_variable
+    /**
+     * The class condition_variable provides a mechanism 
+     * for a fiber to wait for notification from another fiber.
+     *  When the fiber awakens from the wait, then it checks to 
+     * see if the appropriate condition is now true, and continues
+     *  if so. If the condition is not true, then the 
+     * fiber calls wait again to resume waiting 
+    */
     boost::condition_variable newTaskScheduled;
     mutable boost::mutex newTaskMutex;
     int nThreadsServicingQueue;
@@ -94,19 +105,20 @@ private:
  * B() will be able to observe all of the effects of callback A() which executed
  * before it.
  */
-class SingleThreadedSchedulerClient {
+class SingleThreadedSchedulerClient
+{
 private:
-    CScheduler *m_pscheduler;
+    CScheduler* m_pscheduler;
 
     CCriticalSection m_cs_callbacks_pending;
-    std::list<std::function<void ()>> m_callbacks_pending GUARDED_BY(m_cs_callbacks_pending);
+    std::list<std::function<void()>> m_callbacks_pending GUARDED_BY(m_cs_callbacks_pending);
     bool m_are_callbacks_running GUARDED_BY(m_cs_callbacks_pending) = false;
 
     void MaybeScheduleProcessQueue();
     void ProcessQueue();
 
 public:
-    explicit SingleThreadedSchedulerClient(CScheduler *pschedulerIn) : m_pscheduler(pschedulerIn) {}
+    explicit SingleThreadedSchedulerClient(CScheduler* pschedulerIn) : m_pscheduler(pschedulerIn) {}
 
     /**
      * Add a callback to be executed. Callbacks are executed serially
@@ -114,7 +126,7 @@ public:
      * Practically, this means that callbacks can behave as if they are executed
      * in order by a single thread.
      */
-    void AddToProcessQueue(std::function<void ()> func);
+    void AddToProcessQueue(std::function<void()> func);
 
     // Processes all remaining queue members on the calling thread, blocking until queue is empty
     // Must be called after the CScheduler has no remaining processing threads!

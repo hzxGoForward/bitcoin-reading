@@ -88,6 +88,12 @@ struct COrphanTx {
     int64_t nTimeExpire;
     size_t list_pos;
 };
+
+/**
+ * The GUARDED_BY attribute declares that a thread must lock mutex 
+ * before it can read or write to a variable
+ * 
+*/
 CCriticalSection g_cs_orphans;
 std::map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(g_cs_orphans);
 
@@ -149,12 +155,15 @@ std::unique_ptr<CRollingBloomFilter> recentRejects GUARDED_BY(cs_main);
 uint256 hashRecentRejectsChainTip GUARDED_BY(cs_main);
 
 /** Blocks that are in flight, and that are in the queue to be downloaded. */
+// hzx 标记正在下载中的区块
 struct QueuedBlock {
     uint256 hash;
     const CBlockIndex* pindex;                              //!< Optional.
     bool fValidatedHeaders;                                 //!< Whether this block has validated headers at the time of request.
     std::unique_ptr<PartiallyDownloadedBlock> partialBlock; //!< Optional, used for CMPCTBLOCK downloads
 };
+
+// hzx ,标记各个区块从那个节点下载,以及其他相关区块列表的迭代器
 std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator>> mapBlocksInFlight GUARDED_BY(cs_main);
 
 /** Stack of nodes which we have set to announce using compact blocks */
@@ -1286,6 +1295,7 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
 //
 
 
+// hzx Already Have指的是,这笔交易或者区块已经存在于本地内存,而并非已经发出getheader/getdata
 bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     switch (inv.type) {
@@ -2237,7 +2247,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         // We won't accept tx inv's if we're in blocks-only mode, or this is a
         // block-relay-only peer
-        bool fBlocksOnly = !g_relay_txes || (pfrom->m_tx_relay == nullptr);
+        bool fBlocksOnly = !g_relay_txes || (pfrom->m_tx_relay == nullptr); // hzx 本地不转发交易或者pfron不转发交易
 
         // Allow whitelisted peers to send data other than blocks in blocks only mode if whitelistrelay is true
         if (pfrom->HasPermission(PF_RELAY))
@@ -2508,7 +2518,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         EraseTxRequest(inv.hash);
 
         std::list<CTransactionRef> lRemovedTxn;
-
+        // 收到一笔交易,仍然会检测本地是否已经收到.
         if (!AlreadyHave(inv) &&
             AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             mempool.check(&::ChainstateActive().CoinsTip());

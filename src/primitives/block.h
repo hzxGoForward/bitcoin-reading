@@ -17,6 +17,7 @@
  * in the block is a special one that creates a new coin owned by the creator
  * of the block.
  */
+// hzx Block的结构继承自BlockHeader
 class CBlockHeader
 {
 public:

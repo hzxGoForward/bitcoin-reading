@@ -104,6 +104,12 @@ public:
  * Wrapped mutex: supports recursive locking, but no waiting
  * TODO: We should move away from using the recursive lock by default.
  */
+/**
+ * hzx
+ * std::mutex 对象提供了独占所有权的特性——即不支持递归地对 
+ * std::mutex 对象上锁，而 std::recursive_lock 则可以递归地对互斥量对象上锁。
+ * @https://www.cnblogs.com/haippy/p/3237213.html
+*/ 
 using RecursiveMutex = AnnotatedMixin<std::recursive_mutex>;
 typedef AnnotatedMixin<std::recursive_mutex> CCriticalSection;
 
