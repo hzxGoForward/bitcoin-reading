@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+
+// hzx 默认生成256位的cha
 template <unsigned int BITS>
 base_blob<BITS>::base_blob(const std::vector<unsigned char>& vch)
 {

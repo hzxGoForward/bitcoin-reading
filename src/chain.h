@@ -95,6 +95,10 @@ public:
     }
 };
 
+
+// hzx
+// 对所有的区块进行级别鉴定
+// 每次收到的区块,先下载,然后根据检查情况给予级别
 enum BlockStatus : uint32_t {
     //! Unused.
     BLOCK_VALID_UNKNOWN = 0,

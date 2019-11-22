@@ -12,6 +12,11 @@
  * CBaseChainParams defines the base parameters (shared between bitcoin-cli and bitcoind)
  * of a given instance of the Bitcoin system.
  */
+// hzx CBaseChainParams 记录比特币系统最基本的一些参数
+// 链的名称(主链,测试链, 注册测试链?)
+// 数据地址
+// rpc端口号
+// 这些基本名称,在初始化之后不会再变动
 class CBaseChainParams
 {
 public:

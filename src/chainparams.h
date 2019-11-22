@@ -44,6 +44,9 @@ struct ChainTxData {
  * a regression test mode which is intended for private networks only. It has
  * minimal difficulty to ensure that blocks can be found instantly.
  */
+
+// hzx 根据介绍,CChainParams放置一些链上可变的参数
+// 例如ChainTxData,会标记当前最新时间戳,交易数和交易率
 class CChainParams
 {
 public:

@@ -133,9 +133,11 @@ CDBWrapper::CDBWrapper(const fs::path& path, size_t nCacheSize, bool fMemory, bo
             leveldb::Status result = leveldb::DestroyDB(path.string(), options);
             dbwrapper_private::HandleError(result);
         }
+        // hzx 创建index文件
         TryCreateDirectories(path);
         LogPrintf("Opening LevelDB in %s\n", path.string());
     }
+    // hzx 打开本地的leveldb数据库
     leveldb::Status status = leveldb::DB::Open(options, path.string(), &pdb);
     dbwrapper_private::HandleError(status);
     LogPrintf("Opened LevelDB successfully\n");

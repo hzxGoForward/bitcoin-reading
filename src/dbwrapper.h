@@ -134,6 +134,7 @@ public:
 
     void SeekToFirst();
 
+    // 迭代器使用之前必须先Seek
     template<typename K> void Seek(const K& key) {
         CDataStream ssKey(SER_DISK, CLIENT_VERSION);
         ssKey.reserve(DBWRAPPER_PREALLOC_KEY_SIZE);
@@ -196,6 +197,7 @@ private:
     leveldb::WriteOptions syncoptions;
 
     //! the database itself
+    // hzx , 指向数据库的指针
     leveldb::DB* pdb;
 
     //! the name of this database
@@ -307,6 +309,15 @@ public:
 
     CDBIterator *NewIterator()
     {
+        // hzx　返回LevelDB迭代器,迭代对象为this
+        /* 下列解释来自leveldb
+         * Return a heap-allocated iterator over the contents of the database.
+         * The result of NewIterator() is initially invalid (caller must
+         * call one of the Seek methods on the iterator before using it).
+         * Caller should delete the iterator when it is no longer needed.
+         * The returned iterator should be deleted before this db is deleted.
+         * 
+        */
         return new CDBIterator(*this, pdb->NewIterator(iteroptions));
     }
 

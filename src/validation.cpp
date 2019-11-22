@@ -108,7 +108,7 @@ CChain& ChainActive()
  * chainstate at the same time.
  */
 RecursiveMutex cs_main;
-
+// 工作量最大,最早接收到的区块
 CBlockIndex* pindexBestHeader = nullptr;
 Mutex g_best_block_mutex;
 std::condition_variable g_best_block_cv;
@@ -138,6 +138,7 @@ CScript COINBASE_FLAGS;
 
 // Internal stuff
 namespace {
+// hzx pindex BestInvalid 记录块号最大的非法块
 CBlockIndex* pindexBestInvalid = nullptr;
 
 CCriticalSection cs_LastBlockFile;
@@ -3805,6 +3806,8 @@ fs::path GetBlockPosFilename(const FlatFilePos& pos)
     return BlockFileSeq().FileName(pos);
 }
 
+
+// hzx 向m_block_index 中插入hash索引
 CBlockIndex* BlockManager::InsertBlockIndex(const uint256& hash)
 {
     AssertLockHeld(cs_main);
@@ -3824,26 +3827,32 @@ CBlockIndex* BlockManager::InsertBlockIndex(const uint256& hash)
 
     return pindexNew;
 }
-
+// hzx 载入BlockIndex
 bool BlockManager::LoadBlockIndex(
     const Consensus::Params& consensus_params,
     CBlockTreeDB& blocktree,
     std::set<CBlockIndex*, CBlockIndexWorkComparator>& block_index_candidates)
 {
+    // hzx 传入函数 insertBlockIndex, 传入this指针
+    // hzx 这里的疑惑是,为什么不传入变量,而传入函数
+    // 传入变量,该函数只有一个作用,传入函数指针,作用就更多了.
     if (!blocktree.LoadBlockIndexGuts(consensus_params, [this](const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main) { return this->InsertBlockIndex(hash); }))
         return false;
 
     // Calculate nChainWork
+
     std::vector<std::pair<int, CBlockIndex*>> vSortedByHeight;
     vSortedByHeight.reserve(m_block_index.size());
     for (const std::pair<const uint256, CBlockIndex*>& item : m_block_index) {
         CBlockIndex* pindex = item.second;
         vSortedByHeight.push_back(std::make_pair(pindex->nHeight, pindex));
     }
+    // hzx 根据高度排序,从0~当前块
     sort(vSortedByHeight.begin(), vSortedByHeight.end());
     for (const std::pair<int, CBlockIndex*>& item : vSortedByHeight) {
         if (ShutdownRequested()) return false;
         CBlockIndex* pindex = item.second;
+        // 计算工作量
         pindex->nChainWork = (pindex->pprev ? pindex->pprev->nChainWork : 0) + GetBlockProof(*pindex);
         pindex->nTimeMax = (pindex->pprev ? std::max(pindex->pprev->nTimeMax, pindex->nTime) : pindex->nTime);
         // We can link the chain of blocks for which we've received transactions at some point.
@@ -3860,17 +3869,24 @@ bool BlockManager::LoadBlockIndex(
                 pindex->nChainTx = pindex->nTx;
             }
         }
+        // hzx 该区块合法,但是该区块的父区块不合法,则将该区块插入脏区块集合中
         if (!(pindex->nStatus & BLOCK_FAILED_MASK) && pindex->pprev && (pindex->pprev->nStatus & BLOCK_FAILED_MASK)) {
             pindex->nStatus |= BLOCK_FAILED_CHILD;
             setDirtyBlockIndex.insert(pindex);
         }
+        // 如果该区块合法,并且所有父区块到该区块的交易都已经被下载,放入candidate区块中
         if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS) && (pindex->HaveTxsDownloaded() || pindex->pprev == nullptr)) {
             block_index_candidates.insert(pindex);
         }
+        //
         if (pindex->nStatus & BLOCK_FAILED_MASK && (!pindexBestInvalid || pindex->nChainWork > pindexBestInvalid->nChainWork))
             pindexBestInvalid = pindex;
+        // 如果前一个区块存在,求解Skipi,
+        // 96->64, 95->89,
+        // 580000->579968, 10001->99841, 10000->99968
         if (pindex->pprev)
             pindex->BuildSkip();
+        // 记录目前为止最长合法连
         if (pindex->IsValid(BLOCK_VALID_TREE) && (pindexBestHeader == nullptr || CBlockIndexWorkComparator()(pindexBestHeader, pindex)))
             pindexBestHeader = pindex;
     }
@@ -3889,7 +3905,7 @@ void BlockManager::Unload()
 
     m_block_index.clear();
 }
-
+// hzx 载入BlockIndex的数据库
 bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     if (!g_blockman.LoadBlockIndex(
@@ -3903,6 +3919,7 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
     for (int nFile = 0; nFile <= nLastBlockFile; nFile++) {
         pblocktree->ReadBlockFileInfo(nFile, vinfoBlockFile[nFile]);
     }
+    // hzx, 读取结束之后为什么还要读取,不明白, 可能是怕nfile记录不准确?
     LogPrintf("%s: last block file info: %s\n", __func__, vinfoBlockFile[nLastBlockFile].ToString());
     for (int nFile = nLastBlockFile + 1; true; nFile++) {
         CBlockFileInfo info;
@@ -3914,6 +3931,8 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
     }
 
     // Check presence of blk files
+    // 有些区块,只有header,并没有交易本身,此时状态为BLOCK_VALID_TREE
+    // 找到所有可以获取的blk文件编号,并且放入setBlkDataFiles中.
     LogPrintf("Checking all blk files are present...\n");
     std::set<int> setBlkDataFiles;
     for (const std::pair<const uint256, CBlockIndex*>& item : g_blockman.m_block_index) {
@@ -3922,6 +3941,7 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
             setBlkDataFiles.insert(pindex->nFile);
         }
     }
+    // 逐个测试打开blk文件,然后关闭, 主要是测试文件是否可以打开,是否可以读写
     for (std::set<int>::iterator it = setBlkDataFiles.begin(); it != setBlkDataFiles.end(); it++) {
         FlatFilePos pos(*it, 0);
         if (CAutoFile(OpenBlockFile(pos, true), SER_DISK, CLIENT_VERSION).IsNull()) {
@@ -3930,6 +3950,8 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
     }
 
     // Check whether we have ever pruned block & undo files
+    // hzx fHavePruned 这个过程中我没发现对于这个的设置，到底在哪里？在哪里?
+    // hzx, 到底在哪里,快给我出来!!
     pblocktree->ReadFlag("prunedblockfiles", fHavePruned);
     if (fHavePruned)
         LogPrintf("LoadBlockIndexDB(): Block files have previously been pruned\n");
@@ -4379,6 +4401,7 @@ bool CChainState::LoadGenesisBlock(const CChainParams& chainparams)
     // m_blockman.m_block_index. Note that we can't use m_chain here, since it is
     // set based on the coins db, not the block index db, which is the only
     // thing loaded at this point.
+    // hzx m_chain 没有载入,只能用m_block_index 
     if (m_blockman.m_block_index.count(chainparams.GenesisBlock().GetHash()))
         return true;
 

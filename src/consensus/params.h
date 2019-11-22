@@ -10,7 +10,7 @@
 #include <limits>
 #include <map>
 #include <string>
-
+// hzx Consensus是一个命名空间
 namespace Consensus {
 
 enum DeploymentPos
@@ -44,6 +44,9 @@ struct BIP9Deployment {
 /**
  * Parameters that influence chain consensus.
  */
+// hzx Consensus::Params是会影响到共识协议的参数
+// genesis block的哈希
+// 相关BIP内容
 struct Params {
     uint256 hashGenesisBlock;
     int nSubsidyHalvingInterval;
