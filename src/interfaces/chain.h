@@ -30,7 +30,7 @@ namespace interfaces {
 class Handler;
 class Wallet;
 
-// ｈｚｘ　chain.h主要用于给用户提供查询当前区块链状态的接口
+// hzx　chain.h主要用于给用户提供查询当前区块链状态的接口
 //! Interface giving clients (wallet processes, maybe other analysis tools in
 //! the future) ability to access to the chain state, receive notifications,
 //! estimate fees, and submit transactions.

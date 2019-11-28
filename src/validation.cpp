@@ -2492,6 +2492,7 @@ void CChainState::PruneBlockIndexCandidates()
 {
     // Note that we can't delete the current block itself, as we may need to return to it later in case a
     // reorganization to a better block fails.
+    // hzx 删除超过bestchain顶端的CBlockIndex指针
     std::set<CBlockIndex*, CBlockIndexWorkComparator>::iterator it = setBlockIndexCandidates.begin();
     while (it != setBlockIndexCandidates.end() && setBlockIndexCandidates.value_comp()(*it, m_chain.Tip())) {
         setBlockIndexCandidates.erase(it++);
@@ -3875,6 +3876,8 @@ bool BlockManager::LoadBlockIndex(
             setDirtyBlockIndex.insert(pindex);
         }
         // 如果该区块合法,并且所有父区块到该区块的交易都已经被下载,放入candidate区块中
+        // pindex中nStatus状态字段, 对应于BlockStatus字段,根据字段选择
+        // 第一次时,只有创世块会被放入block_index_candidates 中,因为创世块的pprev为nullptr
         if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS) && (pindex->HaveTxsDownloaded() || pindex->pprev == nullptr)) {
             block_index_candidates.insert(pindex);
         }
@@ -3886,7 +3889,7 @@ bool BlockManager::LoadBlockIndex(
         // 580000->579968, 10001->99841, 10000->99968
         if (pindex->pprev)
             pindex->BuildSkip();
-        // 记录目前为止最长合法连
+        // 记录目前为止最长的合法的blockHeader的CBlockIndex索引
         if (pindex->IsValid(BLOCK_VALID_TREE) && (pindexBestHeader == nullptr || CBlockIndexWorkComparator()(pindexBestHeader, pindex)))
             pindexBestHeader = pindex;
     }
@@ -3913,6 +3916,7 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
         return false;
 
     // Load block file info
+    // hzx nLastBlockFile代表什么意思,没明白
     pblocktree->ReadLastBlockFile(nLastBlockFile);
     vinfoBlockFile.resize(nLastBlockFile + 1);
     LogPrintf("%s: last block file = %i\n", __func__, nLastBlockFile);
@@ -3963,13 +3967,16 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams) EXCLUSIVE_LOCKS_RE
 
     return true;
 }
-
+// hzx 是否把所有的chain内容载入了内存
 bool LoadChainTip(const CChainParams& chainparams)
 {
     AssertLockHeld(cs_main);
+    // hzx utxo的缓存
     const CCoinsViewCache& coins_cache = ::ChainstateActive().CoinsTip();
     assert(!coins_cache.GetBestBlock().IsNull()); // Never called when the coins view is empty
 
+
+    // hzx 初始时g_chainState的index为nullptr,
     if (::ChainActive().Tip() &&
         ::ChainActive().Tip()->GetBlockHash() == coins_cache.GetBestBlock()) return true;
 
@@ -3999,9 +4006,11 @@ CVerifyDB::~CVerifyDB()
     uiInterface.ShowProgress("", 100, false);
 }
 
+// hzx 验证区块合法性.
 bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView* coinsview, int nCheckLevel, int nCheckDepth)
 {
     LOCK(cs_main);
+    // hzx 如果为空或者是创世块,直接返回
     if (::ChainActive().Tip() == nullptr || ::ChainActive().Tip()->pprev == nullptr)
         return true;
 
@@ -4125,7 +4134,7 @@ bool CChainState::ReplayBlocks(const CChainParams& params, CCoinsView* view)
     LOCK(cs_main);
 
     CCoinsViewCache cache(view);
-
+    // hzx GetHeadBlocks的作用我目前不太明白,返回的是什么,看不懂解释
     std::vector<uint256> hashHeads = view->GetHeadBlocks();
     if (hashHeads.empty()) return true; // We're already in a consistent state.
     if (hashHeads.size() != 2) return error("ReplayBlocks(): unknown inconsistent state");
@@ -4227,6 +4236,8 @@ void CChainState::EraseBlockData(CBlockIndex* index)
     }
 }
 
+
+// hzx 100行的倒带代码,准备好了吗~
 bool CChainState::RewindBlockIndex(const CChainParams& params)
 {
     // Note that during -reindex-chainstate we are called with an empty m_chain!
@@ -4401,7 +4412,7 @@ bool CChainState::LoadGenesisBlock(const CChainParams& chainparams)
     // m_blockman.m_block_index. Note that we can't use m_chain here, since it is
     // set based on the coins db, not the block index db, which is the only
     // thing loaded at this point.
-    // hzx m_chain 没有载入,只能用m_block_index 
+    // hzx m_chain 没有载入,只能用m_block_index
     if (m_blockman.m_block_index.count(chainparams.GenesisBlock().GetHash()))
         return true;
 
@@ -4760,6 +4771,8 @@ int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::D
 
 static const uint64_t MEMPOOL_DUMP_VERSION = 1;
 
+
+// hzx 载入本地的交易池
 bool LoadMempool(CTxMemPool& pool)
 {
     const CChainParams& chainparams = Params();

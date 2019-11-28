@@ -591,6 +591,7 @@ static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connma
     }
 }
 
+// hzx 该节点的区块更新是否超时,这个更新法则我没太看懂.
 static bool TipMayBeStale(const Consensus::Params& consensusParams) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
@@ -792,6 +793,7 @@ static bool IsOutboundDisconnectionCandidate(const CNode* node)
     return !(node->fInbound || node->m_manual_connection || node->fFeeler || node->fOneShot);
 }
 
+// hzx 初始化一个节点,并且加入mapNodeState中
 void PeerLogicValidation::InitializeNode(CNode* pnode)
 {
     CAddress addr = pnode->addr;
@@ -801,6 +803,7 @@ void PeerLogicValidation::InitializeNode(CNode* pnode)
         LOCK(cs_main);
         mapNodeState.emplace_hint(mapNodeState.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(addr, std::move(addrName), pnode->fInbound, pnode->m_manual_connection));
     }
+    // 主动向对方发送本机的信息
     if (!pnode->fInbound)
         PushNodeVersion(pnode, connman, GetTime());
 }
@@ -1124,6 +1127,8 @@ PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn, BanMan* banman, CS
     // combine them in one function and schedule at the quicker (peer-eviction)
     // timer.
     static_assert(EXTRA_PEER_CHECK_INTERVAL < STALE_CHECK_INTERVAL, "peer eviction timer should be less than stale tip check timer");
+    
+    // hzx 每隔45秒,检查一波,然后驱逐.
     scheduler.scheduleEvery(std::bind(&PeerLogicValidation::CheckForStaleTipAndEvictPeers, this, consensusParams), EXTRA_PEER_CHECK_INTERVAL * 1000);
 }
 
@@ -3447,6 +3452,8 @@ void PeerLogicValidation::ConsiderEviction(CNode* pto, int64_t time_in_seconds)
     }
 }
 
+
+// 驱逐额外连接的peer.
 void PeerLogicValidation::EvictExtraOutboundPeers(int64_t time_in_seconds)
 {
     // Check whether we have too many outbound peers
@@ -3513,7 +3520,7 @@ void PeerLogicValidation::CheckForStaleTipAndEvictPeers(const Consensus::Params&
     if (connman == nullptr) return;
 
     int64_t time_in_seconds = GetTime();
-
+    // hzx 如果连接了足够多的peer, 从中挑选出announce的区块最老的一个,然后考虑断开连接
     EvictExtraOutboundPeers(time_in_seconds);
 
     if (time_in_seconds > m_stale_tip_check_time) {

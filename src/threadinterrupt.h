@@ -22,7 +22,9 @@ class CThreadInterrupt
 public:
     CThreadInterrupt();
     explicit operator bool() const;
+    // hzx operator()将flag设置为true
     void operator()();
+    // hzx reset将flag设置为false
     void reset();
     bool sleep_for(std::chrono::milliseconds rel_time);
     bool sleep_for(std::chrono::seconds rel_time);

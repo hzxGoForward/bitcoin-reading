@@ -345,7 +345,7 @@ void SetupServerArgs()
     const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
     const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
     const auto regtestBaseParams = CreateBaseChainParams(CBaseChainParams::REGTEST);
-    const auto defaultChainParams = CreateChainParams(CBaseChainParams::MAIN);
+    const auto defaultChainParams = CreateChainParams(CBaseChainParams::MAIN); // 创建比特币主网,后文gArgs中使用
     const auto testnetChainParams = CreateChainParams(CBaseChainParams::TESTNET);
     const auto regtestChainParams = CreateChainParams(CBaseChainParams::REGTEST);
 
@@ -398,7 +398,8 @@ void SetupServerArgs()
         strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
             " If <type> is not supplied or if <type> = 1, indexes for all known types are enabled.",
         ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-
+    // hzx -addnode 指的是和指定的这些节点建立连接
+    // hzx -conncet 指的是启动的时候只和某些节点建立连接, addnode在后续可以指定某些节点
     gArgs.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-banscore=<n>", strprintf("Threshold for disconnecting misbehaving peers (default: %u)", DEFAULT_BANSCORE_THRESHOLD), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-bantime=<n>", strprintf("Number of seconds to keep misbehaving peers from reconnecting (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -719,6 +720,7 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
         }
 
         // scan for better chains in the block chain database, that are not yet connected in the active best chain
+        // hzx 没有更好的chain ,那就不连接
         CValidationState state;
         if (!ActivateBestChain(state, chainparams)) {
             LogPrintf("Failed to connect best block (%s)\n", FormatStateMessage(state));
@@ -732,6 +734,7 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
             return;
         }
     } // End scope of CImportingNow
+    // hzx 居然还会从本地载入交易数据,牛~
     if (gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         LoadMempool(::mempool);
     }
@@ -1079,6 +1082,7 @@ bool AppInitParameterInteraction()
         nScriptCheckThreads = MAX_SCRIPTCHECK_THREADS;
 
     // block pruning; get the amount of disk space (in MiB) to allot for block & undo files
+    // -prune用于节省系统内存,会丢弃其他历史久远的区块数据以减少内存占用
     int64_t nPruneArg = gArgs.GetArg("-prune", 0);
     if (nPruneArg < 0) {
         return InitError(_("Prune cannot be configured with a negative value.").translated);
@@ -1317,11 +1321,17 @@ bool AppInitMain(InitInterfaces& interfaces)
     // is not yet setup and may end up being set up twice if we
     // need to reindex later.
 
+    /**
+     * hzx g_conman 和peerLogic给安排上了
+     * g_conman 负责网络连接, peerLogic负责邻居节点行为验证
+     * peerLogic初始化,每隔45秒,驱逐外部连接
+    */
     assert(!g_banman);
     g_banman = MakeUnique<BanMan>(GetDataDir() / "banlist.dat", &uiInterface, gArgs.GetArg("-bantime", DEFAULT_MISBEHAVING_BANTIME));
     assert(!g_connman);
     g_connman = std::unique_ptr<CConnman>(new CConnman(GetRand(std::numeric_limits<uint64_t>::max()), GetRand(std::numeric_limits<uint64_t>::max())));
 
+    // peerLogic初始化中用到了g_connman
     peerLogic.reset(new PeerLogicValidation(g_connman.get(), g_banman.get(), scheduler, gArgs.GetBoolArg("-enablebip61", DEFAULT_ENABLE_BIP61)));
     RegisterValidationInterface(peerLogic.get());
 
@@ -1332,12 +1342,14 @@ bool AppInitMain(InitInterfaces& interfaces)
             return InitError(strprintf(_("User Agent comment (%s) contains unsafe characters.").translated, cmt));
         uacomments.push_back(cmt);
     }
+    // hzx /S按提示:0.18.99/
     strSubVersion = FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, uacomments);
     if (strSubVersion.size() > MAX_SUBVERSION_LENGTH) {
         return InitError(strprintf(_("Total length of network version string (%i) exceeds maximum length (%i). Reduce the number or size of uacomments.").translated,
             strSubVersion.size(), MAX_SUBVERSION_LENGTH));
     }
 
+    // hzx 仅仅和指定的网络地址作为outbound peer进行连接
     if (gArgs.IsArgSet("-onlynet")) {
         std::set<enum Network> nets;
         for (const std::string& snet : gArgs.GetArgs("-onlynet")) {
@@ -1418,6 +1430,7 @@ bool AppInitMain(InitInterfaces& interfaces)
         RegisterValidationInterface(g_zmq_notification_interface);
     }
 #endif
+    // hzx 最大向外连接数不限
     uint64_t nMaxOutboundLimit = 0; //unlimited unless -maxuploadtarget is set
     uint64_t nMaxOutboundTimeframe = MAX_UPLOAD_TIMEFRAME;
 
@@ -1431,13 +1444,13 @@ bool AppInitMain(InitInterfaces& interfaces)
     bool fReindexChainState = gArgs.GetBoolArg("-reindex-chainstate", false);
 
     // cache size calculations
-    int64_t nTotalCache = (gArgs.GetArg("-dbcache", nDefaultDbCache) << 20); // hzx 左移20位,即MB单位
-    nTotalCache = std::max(nTotalCache, nMinDbCache << 20);                  // total cache cannot be less than nMinDbCache
-    nTotalCache = std::min(nTotalCache, nMaxDbCache << 20);                  // total cache cannot be greater than nMaxDbcache
-    int64_t nBlockTreeDBCache = std::min(nTotalCache / 8, nMaxBlockDBCache << 20);
-    nTotalCache -= nBlockTreeDBCache;
-    int64_t nTxIndexCache = std::min(nTotalCache / 8, gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? nMaxTxIndexCache << 20 : 0);
-    nTotalCache -= nTxIndexCache;
+    int64_t nTotalCache = (gArgs.GetArg("-dbcache", nDefaultDbCache) << 20);                                                       // hzx 左移20位,即MB单位, 默认450MB
+    nTotalCache = std::max(nTotalCache, nMinDbCache << 20);                                                                        // total cache cannot be less than nMinDbCache
+    nTotalCache = std::min(nTotalCache, nMaxDbCache << 20);                                                                        // total cache cannot be greater than nMaxDbcache
+    int64_t nBlockTreeDBCache = std::min(nTotalCache / 8, nMaxBlockDBCache << 20);                                                 // hzx nBlockTreeDBCache 为2MB
+    nTotalCache -= nBlockTreeDBCache;                                                                                              // hzx 剩余448MB
+    int64_t nTxIndexCache = std::min(nTotalCache / 8, gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? nMaxTxIndexCache << 20 : 0); // 默认448/8 = 56MB
+    nTotalCache -= nTxIndexCache;                                                                                                  // hzx 剩余392MB
     int64_t filter_index_cache = 0;
     if (!g_enabled_filter_types.empty()) {
         size_t n_indexes = g_enabled_filter_types.size();
@@ -1445,11 +1458,11 @@ bool AppInitMain(InitInterfaces& interfaces)
         filter_index_cache = max_cache / n_indexes;
         nTotalCache -= filter_index_cache * n_indexes;
     }
-    int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
-    nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20);                   // cap total coins db cache
-    nTotalCache -= nCoinDBCache;
-    nCoinCacheUsage = nTotalCache; // the rest goes to in-memory cache
-    int64_t nMempoolSizeMax = gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
+    int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23));           // use 25%-50% of the remainder for disk cache hzx 92MB
+    nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20);                             // cap total coins db cache   hzx 8MB
+    nTotalCache -= nCoinDBCache;                                                               // hzx 剩余384MB
+    nCoinCacheUsage = nTotalCache;                                                             // the rest goes to in-memory cache
+    int64_t nMempoolSizeMax = gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000; // hzx 至少300MB
     LogPrintf("Cache configuration:\n");
     LogPrintf("* Using %.1f MiB for block index database\n", nBlockTreeDBCache * (1.0 / 1024 / 1024));
     if (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
@@ -1476,16 +1489,16 @@ bool AppInitMain(InitInterfaces& interfaces)
                 LOCK(cs_main);
                 // This statement makes ::ChainstateActive() usable.
                 g_chainstate = MakeUnique<CChainState>();
-                UnloadBlockIndex();
+                UnloadBlockIndex(); // 重设g_blockman
 
                 // new CBlockTreeDB tries to delete the existing file, which
                 // fails if it's still open from the previous loop. Close it first:
-                // hzx 重新建立pblocktree,一遍使用
+                // hzx 重新建立pblocktree,以便使用
                 pblocktree.reset();
                 /**
-                 * hzx CBlockTreeDB打开了index文件所在的levelDB数据库
-                 * hzx CBlockTreeDB继承dbwrapper, dbwrapper是对leveldb的封装
-                 * 包含相关leveldb的状态信息, pblocktree指向打开的数据库指针
+                 * hzx CBlockTreeDB打开了本地存储的index文件所在的levelDB数据库
+                 * CBlockTreeDB继承dbwrapper, dbwrapper是对leveldb的封装
+                 * 包含相关leveldb的状态信息, pblocktree指向打开的数据库
                 */
                 pblocktree.reset(new CBlockTreeDB(nBlockTreeDBCache, false, fReset));
 
@@ -1505,6 +1518,8 @@ bool AppInitMain(InitInterfaces& interfaces)
 
                 /**
                  * hzx 打开pblocktree之后开始载入BlockIndex
+                 * 在g_blockman 变量的m_block_index中插入所有本地区块的CBlockIndex
+                 * chainparams以const 引用方式,没有做任何修改
                  * 这个函数嵌套很多,让人很容易头晕~ fuck!!!
                  * 2019年11月22日,LoadBlockIndex顺完了.
                 */
@@ -1516,6 +1531,7 @@ bool AppInitMain(InitInterfaces& interfaces)
 
                 // If the loaded chain has a wrong genesis, bail out immediately
                 // (we're likely using a testnet datadir, or the other way around).
+                // hzx 正常执行不会进入这里,创世块已经初始化,因此不可能为空
                 if (!::BlockIndex().empty() &&
                     !LookupBlockIndex(chainparams.GetConsensus().hashGenesisBlock)) {
                     return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?").translated);
@@ -1532,6 +1548,7 @@ bool AppInitMain(InitInterfaces& interfaces)
                 // If we're not mid-reindex (based on disk + args), add a genesis block on disk
                 // (otherwise we use the one already on disk).
                 // This is called again in ThreadImport after the reindex completes.
+                // hzx 载入创世区块
                 if (!fReindex && !LoadGenesisBlock(chainparams)) {
                     strLoadError = _("Error initializing block database").translated;
                     break;
@@ -1555,6 +1572,7 @@ bool AppInitMain(InitInterfaces& interfaces)
 
                 // If necessary, upgrade from older database format.
                 // This is a no-op if we cleared the coinsviewdb with -reindex or -reindex-chainstate
+                // 当前版本0.18.99不需要更新
                 if (!::ChainstateActive().CoinsDB().Upgrade()) {
                     strLoadError = _("Error upgrading chainstate database").translated;
                     break;
@@ -1569,14 +1587,17 @@ bool AppInitMain(InitInterfaces& interfaces)
                 // The on-disk coinsdb is now in a good state, create the cache
                 // hzx 生成utxo的缓存,方便使用
                 // g_chainstate 中m_coinsview的初始化
+                // 这一阶段并不初始化utxo数据
                 ::ChainstateActive().InitCoinsCache();
                 assert(::ChainstateActive().CanFlushToDisk());
-
+                // GetBestBlock 如果为空,则初始化一个uint256数据
                 is_coinsview_empty = fReset || fReindexChainState ||
                                      ::ChainstateActive().CoinsTip().GetBestBlock().IsNull();
                 if (!is_coinsview_empty) {
                     // LoadChainTip sets ::ChainActive() based on CoinsTip()'s best block
-                    // hzx 初始化m_chain, 此时m_chain状态还没载入
+                    // hzx 确保当前g_chainstate的bestblock和uxto集合中的bestblockhash一致.
+                    // g_chainState中的vchain变量为空,为其初始化创世区块
+                    // 此时最长链的长度仍然为0, 因为后面还需要rewind block,倒带?
                     if (!LoadChainTip(chainparams)) {
                         strLoadError = _("Error initializing block database").translated;
                         break;
@@ -1594,6 +1615,7 @@ bool AppInitMain(InitInterfaces& interfaces)
                 // It both disconnects blocks based on ::ChainActive(), and drops block data in
                 // BlockIndex() based on lack of available witness data.
                 uiInterface.InitMessage(_("Rewinding blocks...").translated);
+                // hzx,RewindBlockIndex,大概意思是数据回放,检查所有区块数据是否合法.
                 if (!RewindBlockIndex(chainparams)) {
                     strLoadError = _("Unable to rewind the database to a pre-fork state. You will need to redownload the blockchain").translated;
                     break;
@@ -1610,6 +1632,7 @@ bool AppInitMain(InitInterfaces& interfaces)
                     }
 
                     CBlockIndex* tip = ::ChainActive().Tip();
+                    // hzx 暂时不关心这个函数,猜想是rpc调用时的反馈结果
                     RPCNotifyBlockChange(true, tip);
                     if (tip && tip->nTime > GetAdjustedTime() + 2 * 60 * 60) {
                         strLoadError = _("The block database contains a block which appears to be from the future. "
@@ -1662,7 +1685,7 @@ bool AppInitMain(InitInterfaces& interfaces)
         LogPrintf("Shutdown requested. Exiting.\n");
         return false;
     }
-
+    // hzx 设置转账资费情况
     fs::path est_path = GetDataDir() / FEE_ESTIMATES_FILENAME;
     CAutoFile est_filein(fsbridge::fopen(est_path, "rb"), SER_DISK, CLIENT_VERSION);
     // Allowed to fail as this file IS missing on first startup.
@@ -1681,6 +1704,8 @@ bool AppInitMain(InitInterfaces& interfaces)
         GetBlockFilterIndex(filter_type)->Start();
     }
 
+
+    // hzx 载入钱包,暂时不关心这个
     // ********************************************************* Step 9: load wallet
     for (const auto& client : interfaces.chain_clients) {
         if (!client->load()) {
@@ -1704,11 +1729,12 @@ bool AppInitMain(InitInterfaces& interfaces)
     if (chainparams.GetConsensus().SegwitHeight != std::numeric_limits<int>::max()) {
         // Advertise witness capabilities.
         // The option to not set NODE_WITNESS is only used in the tests and should be removed.
+        // 设置本方具有NODE_WITNESS能力,1025变为1033.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
 
     // ********************************************************* Step 11: import blocks
-
+    // hzx 检查是否有足够的存储
     if (!CheckDiskSpace(GetDataDir())) {
         InitError(strprintf(_("Error: Disk space is low for %s").translated, GetDataDir()));
         return false;
@@ -1720,6 +1746,7 @@ bool AppInitMain(InitInterfaces& interfaces)
 
     // Either install a handler to notify us when genesis activates, or set fHaveGenesis directly.
     // No locking, as this happens before any background thread is started.
+    // hzx 检测是否已有创世块,标记fHaveGenesis, 不知道这一步想干什么...
     boost::signals2::connection block_notify_genesis_wait_connection;
     if (::ChainActive().Tip() == nullptr) {
         block_notify_genesis_wait_connection = uiInterface.NotifyBlockTip_connect(BlockNotifyGenesisWait);
@@ -1732,6 +1759,7 @@ bool AppInitMain(InitInterfaces& interfaces)
         uiInterface.NotifyBlockTip_connect(BlockNotifyCallback);
 #endif
 
+    // hzx 额外用于导入区块数据, 如果没有使用-loadblock, 不会导入数据
     std::vector<fs::path> vImportFiles;
     for (const std::string& strFile : gArgs.GetArgs("-loadblock")) {
         vImportFiles.push_back(strFile);
@@ -1770,6 +1798,9 @@ bool AppInitMain(InitInterfaces& interfaces)
     if (gArgs.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION))
         StartTorControl();
 
+
+    // hzx  开始发现节点?  nnd,终于进入到discover这一环节了,感觉立马要打通了,有没有,哈哈哈哈..
+    // hzx 留下悔恨的泪水,实际只是是发现自己的ip地址的函数, 捂脸(笑)
     Discover();
 
     // Map ports with UPnP
@@ -1779,8 +1810,10 @@ bool AppInitMain(InitInterfaces& interfaces)
 
     CConnman::Options connOptions;
     connOptions.nLocalServices = nLocalServices;
-    connOptions.nMaxConnections = nMaxConnections;
+    connOptions.nMaxConnections = nMaxConnections; // hzx 默认情况下最多125个连接
+    // hzx full_relay最大8个
     connOptions.m_max_outbound_full_relay = std::min(MAX_OUTBOUND_FULL_RELAY_CONNECTIONS, connOptions.nMaxConnections);
+    // m_max_outbound_block_relay最大2个
     connOptions.m_max_outbound_block_relay = std::min(MAX_BLOCKS_ONLY_CONNECTIONS, connOptions.nMaxConnections - connOptions.m_max_outbound_full_relay);
     connOptions.nMaxAddnode = MAX_ADDNODE_CONNECTIONS;
     connOptions.nMaxFeeler = 1;
@@ -1790,9 +1823,9 @@ bool AppInitMain(InitInterfaces& interfaces)
     connOptions.m_msgproc = peerLogic.get();
     connOptions.nSendBufferMaxSize = 1000 * gArgs.GetArg("-maxsendbuffer", DEFAULT_MAXSENDBUFFER);
     connOptions.nReceiveFloodSize = 1000 * gArgs.GetArg("-maxreceivebuffer", DEFAULT_MAXRECEIVEBUFFER);
-    connOptions.m_added_nodes = gArgs.GetArgs("-addnode");
+    connOptions.m_added_nodes = gArgs.GetArgs("-addnode");              // hzx 如果用户有需要额外添加的节点,则记录在这里
 
-    connOptions.nMaxOutboundTimeframe = nMaxOutboundTimeframe;
+    connOptions.nMaxOutboundTimeframe = nMaxOutboundTimeframe; // 86400, 24小时
     connOptions.nMaxOutboundLimit = nMaxOutboundLimit;
     connOptions.m_peer_connect_timeout = peer_connect_timeout;
 
@@ -1820,6 +1853,7 @@ bool AppInitMain(InitInterfaces& interfaces)
     connOptions.vSeedNodes = gArgs.GetArgs("-seednode");
 
     // Initiate outbound connections unless connect=0
+    // hzx 如果-connect被设置至少应该不少于1个, 然后会指定m_specified_outgoing参数
     connOptions.m_use_addrman_outgoing = !gArgs.IsArgSet("-connect");
     if (!connOptions.m_use_addrman_outgoing) {
         const auto connect = gArgs.GetArgs("-connect");
@@ -1839,7 +1873,7 @@ bool AppInitMain(InitInterfaces& interfaces)
     for (const auto& client : interfaces.chain_clients) {
         client->start(scheduler);
     }
-
+    // hzx 每过900s,即一刻钟,记录恶意节点
     scheduler.scheduleEvery([] {
         g_banman->DumpBanlist();
     },

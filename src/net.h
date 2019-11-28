@@ -148,7 +148,7 @@ public:
         uint64_t nMaxOutboundTimeframe = 0;
         uint64_t nMaxOutboundLimit = 0;
         int64_t m_peer_connect_timeout = DEFAULT_PEER_CONNECT_TIMEOUT;
-        std::vector<std::string> vSeedNodes;
+        std::vector<std::string> vSeedNodes; // 启动时,连接在vSeedNodes中的节点,而不是选取初始化的DNSSeed
         std::vector<NetWhitelistPermissions> vWhitelistedRange;
         std::vector<NetWhitebindPermissions> vWhiteBinds;
         std::vector<CService> vBinds;
@@ -182,7 +182,7 @@ public:
         vWhitelistedRange = connOptions.vWhitelistedRange;
         {
             LOCK(cs_vAddedNodes);
-            vAddedNodes = connOptions.m_added_nodes;
+            vAddedNodes = connOptions.m_added_nodes; // hzx 记录新增加的节点,如果用户全称不进行操作,不会添加节点.
         }
     }
 
@@ -404,14 +404,14 @@ private:
     unsigned int nReceiveFloodSize{0};
 
     std::vector<ListenSocket> vhListenSocket;
-    std::atomic<bool> fNetworkActive{true};
+    std::atomic<bool> fNetworkActive{true}; // hzx 检测网络是否活跃,启动时设置为活跃状态
     bool fAddressesInitialized{false};
-    CAddrMan addrman;
-    std::deque<std::string> vOneShots GUARDED_BY(cs_vOneShots);
+    CAddrMan addrman;                                           // hzx addrman 用于存储DNS查到的节点
+    std::deque<std::string> vOneShots GUARDED_BY(cs_vOneShots); // hzx vOneshots的具体含义暂时不太清楚,只知道LookupHost返回false的时候添加节点
     CCriticalSection cs_vOneShots;
-    std::vector<std::string> vAddedNodes GUARDED_BY(cs_vAddedNodes);
+    std::vector<std::string> vAddedNodes GUARDED_BY(cs_vAddedNodes); // hzx 保存手动添加的节点信息
     CCriticalSection cs_vAddedNodes;
-    std::vector<CNode*> vNodes GUARDED_BY(cs_vNodes);
+    std::vector<CNode*> vNodes GUARDED_BY(cs_vNodes); // hzx,保存建立过连接的节点,但是可能已经断开连接
     std::list<CNode*> vNodesDisconnected;
     mutable CCriticalSection cs_vNodes;
     std::atomic<NodeId> nLastNodeId{0};
@@ -437,7 +437,7 @@ private:
     bool m_use_addrman_outgoing;
     std::atomic<int> nBestHeight;
     CClientUIInterface* clientInterface;
-    NetEventsInterface* m_msgproc;
+    NetEventsInterface* m_msgproc; // hzx 消息处理接口
     BanMan* m_banman;
 
     /** SipHasher seeds for deterministic randomness */
@@ -448,9 +448,9 @@ private:
 
     std::condition_variable condMsgProc;
     Mutex mutexMsgProc;
-    std::atomic<bool> flagInterruptMsgProc{false};
+    std::atomic<bool> flagInterruptMsgProc{false}; // hzx ,是否终止处理其他节点的信息
 
-    CThreadInterrupt interruptNet;
+    CThreadInterrupt interruptNet; //
 
     std::thread threadDNSAddressSeed;
     std::thread threadSocketHandler;
@@ -711,7 +711,7 @@ public:
     std::atomic_bool fDisconnect{false};
     bool fSentAddr{false};
     CSemaphoreGrant grantOutbound;
-    std::atomic<int> nRefCount{0};
+    std::atomic<int> nRefCount{0}; // nRefCount表示当前引用这个CNode对象的线程个数
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
@@ -813,7 +813,7 @@ private:
     std::list<CNetMessage> vRecvMsg; // Used only by SocketHandler thread
 
     mutable CCriticalSection cs_addrName;
-    std::string addrName GUARDED_BY(cs_addrName);
+    std::string addrName GUARDED_BY(cs_addrName); // hzx 对方的名称,可能是个域名
 
     // Our address, as reported by the peer
     CService addrLocal GUARDED_BY(cs_addrLocal);
@@ -858,12 +858,13 @@ public:
     //! May not be called more than once
     void SetAddrLocal(const CService& addrLocalIn);
 
+    // hzx 引用计数+1
     CNode* AddRef()
     {
         nRefCount++;
         return this;
     }
-
+    // hzx 引用计数-1
     void Release()
     {
         nRefCount--;

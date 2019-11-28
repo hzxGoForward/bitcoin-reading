@@ -337,6 +337,8 @@ int GetNumCores();
 /**
  * .. and a wrapper that just calls func once
  */
+
+// 设置线程名称, 然后启动线程
 template <typename Callable> void TraceThread(const char* name,  Callable func)
 {
     util::ThreadRename(name);

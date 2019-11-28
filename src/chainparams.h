@@ -89,7 +89,8 @@ public:
     const ChainTxData& TxData() const { return chainTxData; }
 protected:
     CChainParams() {}
-
+    // hzx consensus存储了很多在共识协议上的修改和规定,以符合bitcoin的法则
+    // 例如 创世块的哈希值, bip改进, 最小工作量等等信息
     Consensus::Params consensus;
     CMessageHeader::MessageStartChars pchMessageStart;
     int nDefaultPort;

@@ -75,7 +75,7 @@ static bool AppInit(int argc, char* argv[])
     // Parameters
     //
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
-    SetupServerArgs(); // 程序服务参数设置, 运行 "./bitcoind --help" 时出现的设置信息
+    SetupServerArgs(); // 程序服务参数设置,初始化创世块,启动主网 "./bitcoind --help" 时出现的设置信息
     std::string error;
     if (!gArgs.ParseParameters(argc, argv, error)) {
         return InitError(strprintf("Error parsing command line arguments: %s\n", error));
@@ -97,6 +97,7 @@ static bool AppInit(int argc, char* argv[])
     }
 
     try {
+        // hzx 检查区块数据路径是否存在
         if (!CheckDataDirOption()) {
             return InitError(strprintf("Specified data directory \"%s\" does not exist.\n", gArgs.GetArg("-datadir", "")));
         }
@@ -105,6 +106,10 @@ static bool AppInit(int argc, char* argv[])
         }
         // Check for -chain, -testnet or -regtest parameter (Params() calls are only valid after this clause)
         try {
+            /**
+             *  hzx 设置区块链参数,生成创世块
+             *  初始化globalChainParams,里面包括创世块的初始化,bip,种子节点等信息.
+             * */
             SelectParams(gArgs.GetChainName());
         } catch (const std::exception& e) {
             return InitError(strprintf("%s\n", e.what()));
