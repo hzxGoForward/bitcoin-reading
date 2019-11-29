@@ -438,9 +438,7 @@ public:
 };
 
 /**
- * hzx 在内存中建立好索引的链
- * 
- * 
+ * hzx 在内存中建立好索引的链 
  *  An in-memory indexed chain of blocks. */
 
 class CChain

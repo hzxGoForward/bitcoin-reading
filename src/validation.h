@@ -580,8 +580,11 @@ private:
      *
      * Mutable because we need to be able to mark IsInitialBlockDownload()
      * const, which latches this for caching purposes.
+     * 
+     * hzx 参考 @https://bitcoin.org/en/p2p-network-guide#blocks-first 
+     * hzx 是否完成了initial Block Download工作
      */
-    mutable std::atomic<bool> m_cached_finished_ibd{false};
+    mutable std::atomic<bool> m_cached_finished_ibd{false};     
 
     //! Reference to a BlockManager instance which itself is shared across all
     //! CChainState instances. Keeping a local reference allows us to test more

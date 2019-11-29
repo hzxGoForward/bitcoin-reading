@@ -368,6 +368,8 @@ struct CNodeState {
     bool m_is_inbound;
 
     //! Whether this peer is a manual connection
+    // hzx 这个函数调用的net.cpp文件的会调用,InitializeNode
+    // hzx 除了基本参数初始化,其他状态初始化为0和false以及NULL.
     bool m_is_manual_connection;
     CNodeState(CAddress addrIn, std::string addrNameIn, bool is_inbound, bool is_manual) : address(addrIn), name(std::move(addrNameIn)), m_is_inbound(is_inbound),
                                                                                            m_is_manual_connection(is_manual)
@@ -431,7 +433,7 @@ static void PushNodeVersion(CNode* pnode, CConnman* connman, int64_t nTime)
     int nNodeStartingHeight = pnode->GetMyStartingHeight();
     NodeId nodeid = pnode->GetId();
     CAddress addr = pnode->addr;
-
+    // hzx 先发对方ip,再发本方ip
     CAddress addrYou = (addr.IsRoutable() && !IsProxy(addr) ? addr : CAddress(CService(), addr.nServices));
     CAddress addrMe = CAddress(CService(), nLocalNodeServices);
 
@@ -1127,7 +1129,7 @@ PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn, BanMan* banman, CS
     // combine them in one function and schedule at the quicker (peer-eviction)
     // timer.
     static_assert(EXTRA_PEER_CHECK_INTERVAL < STALE_CHECK_INTERVAL, "peer eviction timer should be less than stale tip check timer");
-    
+
     // hzx 每隔45秒,检查一波,然后驱逐.
     scheduler.scheduleEvery(std::bind(&PeerLogicValidation::CheckForStaleTipAndEvictPeers, this, consensusParams), EXTRA_PEER_CHECK_INTERVAL * 1000);
 }
@@ -1936,6 +1938,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         return true;
     }
 
+    // hzx 刚刚建立连接后向对方发送版本号
     if (strCommand == NetMsgType::VERSION) {
         // Each connection can only send one version message
         if (pfrom->nVersion != 0) {
@@ -1958,13 +1961,15 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         std::string cleanSubVer;
         int nStartingHeight = -1;
         bool fRelay = true;
-
+        // hzx 将消息体中的相关信息提取出来
         vRecv >> nVersion >> nServiceInt >> nTime >> addrMe;
         nSendVersion = std::min(nVersion, PROTOCOL_VERSION);
         nServices = ServiceFlags(nServiceInt);
+        // hzx 只有对outbound节点设置Services
         if (!pfrom->fInbound) {
             connman->SetServices(pfrom->addr, nServices);
         }
+        // hzx 如果是 外部节点 && 非手动添加的 && 没有提供全部服务,直接拜拜
         if (!pfrom->fInbound && !pfrom->fFeeler && !pfrom->m_manual_connection && !HasAllDesirableServiceFlags(nServices)) {
             LogPrint(BCLog::NET, "peer=%d does not offer the expected services (%08x offered, %08x expected); disconnecting\n", pfrom->GetId(), nServices, GetDesirableServiceFlags(nServices));
             if (enable_bip61) {
@@ -1994,6 +1999,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (!vRecv.empty()) {
             vRecv >> nStartingHeight;
         }
+        // hzx fRelay表示是否进行消息(区块\交易)的转发
         if (!vRecv.empty())
             vRecv >> fRelay;
         // Disconnect if we connected to ourself
@@ -2008,12 +2014,14 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         // Be shy and don't send version until we hear
+        // hzx 如果是内部连接,先发送Version后发送VERACK
         if (pfrom->fInbound)
             PushNodeVersion(pfrom, connman, GetAdjustedTime());
-
+        // hzx 如果是外部连接, 直接发送VERACK,因为先前已经发送过VERSION
         connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERACK));
 
         pfrom->nServices = nServices;
+        // hzx addrMe是在pfrom收到的我方的地址
         pfrom->SetAddrLocal(addrMe);
         {
             LOCK(pfrom->cs_SubVer);
@@ -2026,7 +2034,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         pfrom->fClient = (!(nServices & NODE_NETWORK) && !(nServices & NODE_NETWORK_LIMITED));
 
         // set nodes not capable of serving the complete blockchain history as "limited nodes"
-        // 只提供2天以内的区块服务的节点
+        // hzx 只提供2天以内的区块服务的节点
         pfrom->m_limited_node = (!(nServices & NODE_NETWORK) && (nServices & NODE_NETWORK_LIMITED));
 
         if (pfrom->m_tx_relay != nullptr) {
@@ -2035,6 +2043,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         // Change version
+        // hzx,发送数据时需要考虑的version
         pfrom->SetSendVersion(nSendVersion);
         pfrom->nVersion = nVersion;
 
@@ -2069,6 +2078,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
                 pfrom->fGetAddr = true;
             }
+            // hzx 标记pfrom的addr地址可用
             connman->MarkAddressGood(pfrom->addr);
         }
 
@@ -2080,7 +2090,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             cleanSubVer, pfrom->nVersion,
             pfrom->nStartingHeight, addrMe.ToString(), pfrom->GetId(),
             remoteAddr);
-
+        // hzx nTime是发送信息的时间, GetTime当前时间
         int64_t nTimeOffset = nTime - GetTime();
         pfrom->nTimeOffset = nTimeOffset;
         AddTimeData(pfrom->addr, nTimeOffset);
@@ -2113,9 +2123,10 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
     * informing the connecting node that it can begin to send other messages. 
     * The verack message has no payload; for an example of a message with no payload, 
     * 
-    * VERACK 信息不携带其他任何数据
+    * hzx VERACK 信息不携带其他任何数据
     */
     if (strCommand == NetMsgType::VERACK) {
+        // hzx 收到的数据只能是两个节点之间更低的版本
         pfrom->SetRecvVersion(std::min(pfrom->nVersion.load(), PROTOCOL_VERSION));
 
         if (!pfrom->fInbound) {
@@ -2143,24 +2154,25 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // they may wish to request compact blocks from us
             // hzx 详情查看 https://bitcoin.org/en/developer-reference#cmpctblock
             // hzx Version 1 的compact 是 pre-segwit(txids), version 2 的compact 区块是post-segwit(wtxids)
-            bool fAnnounceUsingCMPCTBLOCK = false; // 该变量表示是否支持接收压缩区块.
+            bool fAnnounceUsingCMPCTBLOCK = false; // hzx 该变量告诉pfrom,我方不需要pfrom用压缩区块声明区块
             uint64_t nCMPCTBLOCKVersion = 2;
             if (pfrom->GetLocalServices() & NODE_WITNESS)
                 connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
             nCMPCTBLOCKVersion = 1;
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
         }
+        // hzx 只有VERACK交换完毕,SendMessage才会向发送信息
         pfrom->fSuccessfullyConnected = true;
         return true;
     }
-
+    // hzx 收到的不是VERSION,也不是VERACK,但是和对方没有成功建立连接,惩罚对方,错误操作score+1
     if (!pfrom->fSuccessfullyConnected) {
         // Must have a verack message before anything else
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
-    // hzx 向我方发送它的连接信息
+    // hzx 收到Addr信息
     if (strCommand == NetMsgType::ADDR) {
         std::vector<CAddress> vAddr;
         vRecv >> vAddr;
@@ -2171,7 +2183,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (!pfrom->IsAddrRelayPeer()) {
             return true;
         }
-        if (vAddr.size() > 1000) { // 发送超过1000个addr,直接惩罚值+20
+        if (vAddr.size() > 1000) { // hzx 发送超过1000个addr,直接惩罚值+20
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20, strprintf("message addr size() = %u", vAddr.size()));
             return false;
@@ -2444,6 +2456,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         LOCK(cs_main);
+        // 本地节点在下载区块中,并且对方节点不被允许
         if (::ChainstateActive().IsInitialBlockDownload() && !pfrom->HasPermission(PF_NOBAN)) {
             LogPrint(BCLog::NET, "Ignoring getheaders from peer=%d because node is in initial block download\n", pfrom->GetId());
             return true;
@@ -3273,6 +3286,7 @@ bool PeerLogicValidation::SendRejectsAndCheckIfBanned(CNode* pnode, bool enable_
     return false;
 }
 
+// hzx 处理从pfrom节点处收到的消息
 bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)
 {
     const CChainParams& chainparams = Params();
@@ -3566,7 +3580,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             return true;
 
         // If we get here, the outgoing message serialization version is set and can't change.
-        // hzx get sending versions
+        // hzx 向对方发送消息的发送版本
         const CNetMsgMaker msgMaker(pto->GetSendVersion());
 
         //
@@ -3577,7 +3591,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             // RPC ping request by user
             pingSend = true;
         }
-        // hzx nPingUsecStart denote last time we sent ping, if it is 0, means never send ping message
+        // hzx nPingUsecStart 表示上次发送ping的时间
         if (pto->nPingNonceSent == 0 && pto->nPingUsecStart + PING_INTERVAL * 1000000 < GetTimeMicros()) {
             // Ping automatically sent as a latency probe & keepalive.
             pingSend = true;
@@ -3604,8 +3618,10 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         TRY_LOCK(cs_main, lockMain); // Acquire cs_main for IsInitialBlockDownload() and CNodeState()
         if (!lockMain)
             return true;
-        // hzx send reject message and if banned the node, return.
+        // hzx 如果禁止了该节点,则发送Reject信息
         if (SendRejectsAndCheckIfBanned(pto, m_enable_bip61)) return true;
+
+        // 初始化该节点的state
         CNodeState& state = *State(pto->GetId());
 
         // Address refresh broadcast
@@ -3621,6 +3637,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         //
         // hzx @ https://bitcoin.org/en/developer-reference#addr
         // hzx 向peer发送已知的peer信息
+        // hzx 下面这段代码中pushMessage在循环中和循坏外都调用了一次,意味着向peer发送的地址数量每次不超过1000个,但是peer会多次发送.
         if (pto->IsAddrRelayPeer() && pto->nNextAddrSend < nNow) {
             pto->nNextAddrSend = PoissonNextSend(nNow, AVG_ADDRESS_BROADCAST_INTERVAL);
             std::vector<CAddress> vAddr;
@@ -3638,22 +3655,26 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             }
             pto->vAddrToSend.clear();
             if (!vAddr.empty())
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr)); // 剩余地址不超过1000个,也需要发送
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::ADDR, vAddr)); // hzx 剩余地址不超过1000个,也需要发送
             // we only send the big addr message once
             if (pto->vAddrToSend.capacity() > 40)
                 pto->vAddrToSend.shrink_to_fit();
         }
 
         // Start block sync
-        // hzx
+        // hzx 进行区块同步
         if (pindexBestHeader == nullptr)
             pindexBestHeader = ::ChainActive().Tip();
         bool fFetch = state.fPreferredDownload || (nPreferredDownload == 0 && !pto->fClient && !pto->fOneShot); // Download if this is a nice peer, or we have no nice peers and this one might do.
+
         if (!state.fSyncStarted && !pto->fClient && !fImporting && !fReindex) {
             // Only actively request headers from a single peer, unless we're close to today.
+            // hzx 初始启动时, 必然会进行同步,或者对方时间领先我方最新区块的时间不超过24小时, 把这个公式换下位置,就看明白了.
+            //  GetAdjustedTime() -pindexBestHeader->GetBlockTime()< 24 * 60 * 60
             if ((nSyncStarted == 0 && fFetch) || pindexBestHeader->GetBlockTime() > GetAdjustedTime() - 24 * 60 * 60) {
                 state.fSyncStarted = true;
                 state.nHeadersSyncTimeout = GetTimeMicros() + HEADERS_DOWNLOAD_TIMEOUT_BASE + HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER * (GetAdjustedTime() - pindexBestHeader->GetBlockTime()) / (consensusParams.nPowTargetSpacing);
+
                 nSyncStarted++;
                 const CBlockIndex* pindexStart = pindexBestHeader;
                 /* If possible, start at the block preceding the currently
@@ -3663,13 +3684,15 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                    the peer's known best block.  This wouldn't be possible
                    if we requested starting at pindexBestHeader and
                    got back an empty response.  */
+                // hzx 为什么指向前一个,英文解释说的很清楚了.
                 if (pindexStart->pprev)
                     pindexStart = pindexStart->pprev;
 
                 // hzx detail @ https://bitcoin.org/en/p2p-network-guide#headers-first
-                // 对方一次性传递2000个block
+                // hzx 对方一次性最多传递2000个block
 
                 LogPrint(BCLog::NET, "initial getheaders (%d) to peer=%d (startheight:%d)\n", pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
+
                 connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
             }
         }

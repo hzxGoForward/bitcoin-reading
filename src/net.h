@@ -641,7 +641,7 @@ public:
 
 
 /** Information about a peer */
-// 详细信息见 https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_4):_P2P_Network
+// hzx 详细信息见 https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_4):_P2P_Network
 /*
 * At any given time, the node is connected with a set of other nodes, i.e. peers. 
 * By default the code connects to 8 outbound peers (nodes that our node goes out and finds) 
@@ -657,7 +657,7 @@ class CNode
 
 public:
     // socket
-    std::atomic<ServiceFlags> nServices{NODE_NONE}; // 提供的服务,1表示全节点,0表示轻节点
+    std::atomic<ServiceFlags> nServices{NODE_NONE}; // hzx 提供的服务,1表示全节点,0表示轻节点
     SOCKET hSocket GUARDED_BY(cs_hSocket);
     size_t nSendSize{0};   // total size of all vSendMsg entries
     size_t nSendOffset{0}; // offset inside the first vSendMsg already sent
@@ -668,14 +668,15 @@ public:
     CCriticalSection cs_vRecv;
 
     CCriticalSection cs_vProcessMsg;
+    // hzx vProcessMsg 表示节点需要处理的消息队列, 而vRecvMsg是Socket接收到消息之后将信息放入vRecvMsg队列中
     std::list<CNetMessage> vProcessMsg GUARDED_BY(cs_vProcessMsg);
     size_t nProcessQueueSize{0};
 
     CCriticalSection cs_sendProcessing;
 
     std::deque<CInv> vRecvGetData;
-    uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
-    std::atomic<int> nRecvVersion{INIT_PROTO_VERSION};
+    uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};       // hzx 表示收到的数据字节数
+    std::atomic<int> nRecvVersion{INIT_PROTO_VERSION}; // hzx nRecvVersion表示最低的版本号
 
     std::atomic<int64_t> nLastSend{0};
     std::atomic<int64_t> nLastRecv{0};
@@ -699,26 +700,28 @@ public:
     }
     // This boolean is unusued in actual processing, only present for backward compatibility at RPC/QT level
     bool m_legacyWhitelisted{false};
-    bool fFeeler{false}; // If true this node is being used as a short lived feeler.
-    bool fOneShot{false};
+    bool fFeeler{false};  // If true this node is being used as a short lived feeler.
+    bool fOneShot{false}; // hzx fOneShot初始化false
     bool m_manual_connection{false};
     bool fClient{false};        // set by version message
     bool m_limited_node{false}; //after BIP159, set by version message
-    const bool fInbound;        // 是否是接入的连接
+    const bool fInbound;        // hzx 是否是接入的连接
     std::atomic_bool fSuccessfullyConnected{false};
     // Setting fDisconnect to true will cause the node to be disconnected the
     // next time DisconnectNodes() runs
     std::atomic_bool fDisconnect{false};
     bool fSentAddr{false};
     CSemaphoreGrant grantOutbound;
-    std::atomic<int> nRefCount{0}; // nRefCount表示当前引用这个CNode对象的线程个数
+    std::atomic<int> nRefCount{0}; // hzx nRefCount表示当前引用这个CNode对象的线程个数
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
     std::atomic_bool fPauseSend{false};
 
 protected:
+    // hzx map<string, int64_t> 类型,命令->大小(headerSize + msgSize)
     mapMsgCmdSize mapSendBytesPerMsgCmd;
+    // hzx map<string, int64_t> 类型,命令->大小(headerSize + msgSize)
     mapMsgCmdSize mapRecvBytesPerMsgCmd GUARDED_BY(cs_vRecv);
 
 public:
@@ -726,10 +729,10 @@ public:
     std::atomic<int> nStartingHeight{-1};
 
     // flood relay
-    std::vector<CAddress> vAddrToSend;
-    CRollingBloomFilter addrKnown;
+    std::vector<CAddress> vAddrToSend;          // hzx 向对方广播的地址集合
+    CRollingBloomFilter addrKnown;              // hzx addrKnown表示对方已知的地址的布隆过滤器
     bool fGetAddr{false};
-    int64_t nNextAddrSend GUARDED_BY(cs_sendProcessing){0};
+    int64_t nNextAddrSend GUARDED_BY(cs_sendProcessing){0}; // hzx 下一次向对方发送地址的时间
     int64_t nNextLocalAddrSend GUARDED_BY(cs_sendProcessing){0};
 
     // hzx whether this node is a addr_relay node, such as DNS seed node.
@@ -875,7 +878,7 @@ public:
     {
         addrKnown.insert(_addr.GetKey());
     }
-
+    // 将addr加入我方已知的地址中去, 最大为1000个地址
     void PushAddress(const CAddress& _addr, FastRandomContext& insecure_rand)
     {
         // Known checking here is only to save space from duplicates.
@@ -883,6 +886,7 @@ public:
         // after addresses were pushed.
         if (_addr.IsValid() && !addrKnown.contains(_addr.GetKey())) {
             if (vAddrToSend.size() >= MAX_ADDR_TO_SEND) {
+                // hzx 这里是随机替换的意思吗?
                 vAddrToSend[insecure_rand.randrange(vAddrToSend.size())] = _addr;
             } else {
                 vAddrToSend.push_back(_addr);

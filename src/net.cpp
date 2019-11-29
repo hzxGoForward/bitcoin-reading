@@ -445,6 +445,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char* pszDest, bool fCo
 
     // Add node
     NodeId id = GetNewNodeId();
+    // hzx 创建的时候nonce是随机生成,但是收到version信息之后会进行修改
     uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
     CAddress addr_bind = GetBindAddress(hSocket);
     CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", false, block_relay_only);
@@ -568,6 +569,7 @@ void CNode::copyStats(CNodeStats& stats)
 }
 #undef X
 
+// hzx CNode类函数,将消息插入CNode的vRecvMsg中
 bool CNode::ReceiveMsgBytes(const char* pch, unsigned int nBytes, bool& complete)
 {
     complete = false;
@@ -577,8 +579,7 @@ bool CNode::ReceiveMsgBytes(const char* pch, unsigned int nBytes, bool& complete
     nRecvBytes += nBytes;
     while (nBytes > 0) {
         // get current incomplete message, or create a new one
-        if (vRecvMsg.empty() ||
-            vRecvMsg.back().complete())
+        if (vRecvMsg.empty() || vRecvMsg.back().complete())
             vRecvMsg.push_back(CNetMessage(Params().MessageStart(), SER_NETWORK, INIT_PROTO_VERSION));
 
         CNetMessage& msg = vRecvMsg.back();
@@ -597,8 +598,9 @@ bool CNode::ReceiveMsgBytes(const char* pch, unsigned int nBytes, bool& complete
             LogPrint(BCLog::NET, "Oversized message from peer=%i, disconnecting\n", GetId());
             return false;
         }
-
+        // hzx pch中存放数据,读取完毕后进行移动
         pch += handled;
+        // hzx nBytes表示剩余的字节数
         nBytes -= handled;
 
         if (msg.complete()) {
@@ -608,8 +610,7 @@ bool CNode::ReceiveMsgBytes(const char* pch, unsigned int nBytes, bool& complete
             if (i == mapRecvBytesPerMsgCmd.end())
                 i = mapRecvBytesPerMsgCmd.find(NET_MESSAGE_COMMAND_OTHER);
             assert(i != mapRecvBytesPerMsgCmd.end());
-            i->second += msg.hdr.nMessageSize + CMessageHeader::HEADER_SIZE;
-
+            i->second += msg.hdr.nMessageSize + CMessageHeader::HEADER_SIZE; // hzx dataSize+headerSize
             msg.nTime = nTimeMicros;
             complete = true;
         }
@@ -644,7 +645,7 @@ int CNode::GetSendVersion() const
     return nSendVersion;
 }
 
-
+// hzx 读取头部数据, 头部数据大小24Byte
 int CNetMessage::readHeader(const char* pch, unsigned int nBytes)
 {
     // copy data to temporary parsing buffer
@@ -1319,14 +1320,15 @@ void CConnman::SocketHandler()
                 LOCK(pnode->cs_hSocket);
                 if (pnode->hSocket == INVALID_SOCKET)
                     continue;
-                nBytes = recv(pnode->hSocket, pchBuf, sizeof(pchBuf), MSG_DONTWAIT);
+                nBytes = recv(pnode->hSocket, pchBuf, sizeof(pchBuf), MSG_DONTWAIT); // hzx 接收数据放入pchBuf中
             }
             if (nBytes > 0) {
                 bool notify = false;
                 if (!pnode->ReceiveMsgBytes(pchBuf, nBytes, notify))
                     pnode->CloseSocketDisconnect();
-                RecordBytesRecv(nBytes);
+                RecordBytesRecv(nBytes); // hzx 增加整体收到的数据量
                 if (notify) {
+                    // hzx vRecv中有些消息可能没有接收完整,所以从vRecvMsg中把完整的消息放入vProcessMsg队列中
                     size_t nSizeAdded = 0;
                     auto it(pnode->vRecvMsg.begin());
                     for (; it != pnode->vRecvMsg.end(); ++it) {
@@ -1336,11 +1338,14 @@ void CConnman::SocketHandler()
                     }
                     {
                         LOCK(pnode->cs_vProcessMsg);
+                        // hzx splice将vRecvMsg中完整的消息转移到vProcessMsg队列中来.
                         pnode->vProcessMsg.splice(pnode->vProcessMsg.end(), pnode->vRecvMsg, pnode->vRecvMsg.begin(), it);
+                        // hzx 更新队列消息大小
                         pnode->nProcessQueueSize += nSizeAdded;
+                        // 是否停止接收消息
                         pnode->fPauseRecv = pnode->nProcessQueueSize > nReceiveFloodSize;
                     }
-                    WakeMessageHandler();
+                    WakeMessageHandler(); // hzx 提醒消息处理线程,处理消息
                 }
             } else if (nBytes == 0) {
                 // socket closed gracefully
@@ -1527,7 +1532,7 @@ void CConnman::ThreadDNSAddressSeed()
 
         LOCK(cs_vNodes);
 
-        // hzx 如果相关可知的节点不少于2个,则不用及你性格DNSSeed了.
+        // hzx 如果相关可知的节点不少于2个,则不用询问DNSSeed了.
         int nRelevant = 0;
         for (const CNode* pnode : vNodes) {
             nRelevant += pnode->fSuccessfullyConnected && !pnode->fFeeler && !pnode->fOneShot && !pnode->m_manual_connection && !pnode->fInbound;
@@ -1608,6 +1613,7 @@ void CConnman::ProcessOneShot()
     if (grant) {
         // hzx 这里传入一个const 类型的addr, addr默认初始化基本每什么卵用
         // hzx 使用OpenNetworkConnection和psz建立连接,这是想干什么!!!
+        // OneShot里面block_relay_only参数仍然设定为true
         OpenNetworkConnection(addr, false, &grant, strDest.c_str(), true);
     }
 }
@@ -1655,6 +1661,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             ProcessOneShot();
             for (const std::string& strAddr : connect) {
                 CAddress addr(CService(), NODE_NONE);
+                // hzx 如果是指定的node,这里传入的参数,block_relay_only为true.
                 OpenNetworkConnection(addr, false, nullptr, strAddr.c_str(), false, false, true);
                 for (int i = 0; i < 10 && i < nLoop; i++) {
                     if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
@@ -1815,6 +1822,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             // (It should not be possible for fFeeler to be set if we're not
             // also at our block-relay peer limit, but check against that as
             // well for sanity.)
+            // hzx 默认情况, m_max_outbound_block_relay为8, m_max_outbound_full_relay为2, fFeeler会成false,此时block_relay_only会初始化为false
             bool block_relay_only = nOutboundBlockRelay < m_max_outbound_block_relay && !fFeeler && nOutboundFullRelay >= m_max_outbound_full_relay;
 
             OpenNetworkConnection(addrConnect, (int)setConnected.size() >= std::min(nMaxConnections - 1, 2), &grant, nullptr, false, fFeeler, false, block_relay_only);
@@ -1891,6 +1899,7 @@ void CConnman::ThreadOpenAddedConnections()
                 }
                 tried = true;
                 CAddress addr(CService(), NODE_NONE);
+                // 如果是指定的节点建立连接,此时最后一个参数block_relay_only 仍然为true
                 OpenNetworkConnection(addr, false, &grant, info.strAddedNode.c_str(), false, false, true);
                 if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
                     return;
@@ -1968,6 +1977,7 @@ void CConnman::ThreadMessageHandler()
             // Send messages
             {
                 LOCK(pnode->cs_sendProcessing);
+                // hzx 调用发送信息机制,向对方发送信息
                 m_msgproc->SendMessages(pnode);
             }
 
@@ -2237,12 +2247,7 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     }
 
     // Send and receive from sockets, accept connections
-    // hzx, 启动线程
-    // 第一个参数是线程名称,后续是线程参数
-    // 分别启动不同线程,线程名称分别是 net, dnsseed和addcon
-    // 这部分开启了5个线程
-
-    // ThreadSocketHandler 用来处理其他节点建立连接的请求
+    // ThreadSocketHandler 接收消息,发送消息并且处理其他节点建立连接的请求
     threadSocketHandler = std::thread(&TraceThread<std::function<void()>>, "net", std::function<void()>(std::bind(&CConnman::ThreadSocketHandler, this)));
 
     if (!gArgs.GetBoolArg("-dnsseed", true))
@@ -2272,6 +2277,7 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     threadMessageHandler = std::thread(&TraceThread<std::function<void()>>, "msghand", std::function<void()>(std::bind(&CConnman::ThreadMessageHandler, this)));
 
     // Dump network addresses
+    // hzx 每过900秒,存储本地知道的ip地址
     scheduler.scheduleEvery(std::bind(&CConnman::DumpAddresses, this), DUMP_PEERS_INTERVAL * 1000);
 
     return true;
@@ -2609,6 +2615,9 @@ int CConnman::GetBestHeight() const
 
 unsigned int CConnman::GetReceiveFloodSize() const { return nReceiveFloodSize; }
 
+// hzx 在初始化的过程中,发现所有节点初始化过程中, block_relay_only设置为true, 所以m_addr_relay_peer为false
+// block_relay_only并非CNode的属性
+// 收到version信息之后会对m_tx_relay进行修改
 CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, bool fInboundIn, bool block_relay_only)
     : nTimeConnected(GetSystemTimeInSeconds()),
       addr(addrIn),
@@ -2619,7 +2628,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
       // Don't relay addr messages to peers that we connect to as block-relay-only
       // peers (to prevent adversaries from inferring these links from addr
       // traffic).
-      m_addr_relay_peer(!block_relay_only),
+      m_addr_relay_peer(!block_relay_only), // hzx 如果该节点不是只转发区块,则可以向其广播地址
       id(idIn),
       nLocalHostNonce(nLocalHostNonceIn),
       nLocalServices(nLocalServicesIn),
@@ -2653,6 +2662,7 @@ bool CConnman::NodeFullyConnected(const CNode* pnode)
     return pnode && pnode->fSuccessfullyConnected && !pnode->fDisconnect;
 }
 
+// hzx PushMessage是向对方发送信息的缓存中加入信息,然后等待net.cpp中MessageHandler进行发送.
 void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
 {
     size_t nMessageSize = msg.data.size();
@@ -2675,9 +2685,10 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
         //log total amount of bytes per command
         pnode->mapSendBytesPerMsgCmd[msg.command] += nTotalSize;
         pnode->nSendSize += nTotalSize;
-
+        // hzx 如果发送的信息量超过了buffer大小,则停止发送
         if (pnode->nSendSize > nSendBufferMaxSize)
             pnode->fPauseSend = true;
+        // hzx 先加消息头,再加消息体
         pnode->vSendMsg.push_back(std::move(serializedHeader));
         if (nMessageSize)
             pnode->vSendMsg.push_back(std::move(msg.data));
