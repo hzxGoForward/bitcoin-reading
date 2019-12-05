@@ -594,6 +594,7 @@ static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connma
 }
 
 // hzx 该节点的区块更新是否超时,这个更新法则我没太看懂.
+// hzx consensusParams.nPowTargetSpacing这个干什么用的?
 static bool TipMayBeStale(const Consensus::Params& consensusParams) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
@@ -1663,6 +1664,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
         //   don't connect before giving DoS points
         // - Once a headers message is received that is valid and does connect,
         //   nUnconnectingHeaders gets reset back to 0.
+        // hzx 在本地查找是否存在headers[0]的前一个区块索引, 如果没找到,先向对方请求之前的区块
         if (!LookupBlockIndex(headers[0].hashPrevBlock) && nCount < MAX_BLOCKS_TO_ANNOUNCE) {
             nodestate->nUnconnectingHeaders++;
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexBestHeader), uint256()));
@@ -1675,7 +1677,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
             // eventually get the headers - even from a different peer -
             // we can use this peer to download.
             UpdateBlockAvailability(pfrom->GetId(), headers.back().GetHash());
-
+            // hzx 发送的无连接的区块数为10的倍数,错误行为分数+20
             if (nodestate->nUnconnectingHeaders % MAX_UNCONNECTING_HEADERS == 0) {
                 Misbehaving(pfrom->GetId(), 20);
             }
@@ -1683,6 +1685,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
         }
 
         uint256 hashLastBlock;
+        // hzx 检查headers是否是连续的,如果发现某些区块前后不连续,直接返回false,不在分析
         for (const CBlockHeader& header : headers) {
             if (!hashLastBlock.IsNull() && header.hashPrevBlock != hashLastBlock) {
                 Misbehaving(pfrom->GetId(), 20, "non-continuous headers sequence");
@@ -1693,6 +1696,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
 
         // If we don't have the last header, then they'll have given us
         // something new (if these headers are valid).
+        // hzx 循环走到这一步,说明区块全部是连续的,如果最后一个区块本地没找到,说明收到新的区块
         if (!LookupBlockIndex(hashLastBlock)) {
             received_new_header = true;
         }
@@ -1734,6 +1738,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexLast), uint256()));
         }
 
+        // hzx 到这一步,说明headers的最后一个区块是本地没有的,判断能否获取block body.
         bool fCanDirectFetch = CanDirectFetch(chainparams.GetConsensus());
         // If this set of headers is valid and ends in a block with at least as
         // much work as our tip, download as much as possible.
@@ -1741,12 +1746,13 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
             std::vector<const CBlockIndex*> vToFetch;
             const CBlockIndex* pindexWalk = pindexLast;
             // Calculate all the blocks we'd need to switch to pindexLast, up to a limit.
+            // hzx vToFetch实际上最多放置16区块.
             while (pindexWalk && !::ChainActive().Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                     !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
                     (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness)) {
                     // We don't have this block, and it's not yet in flight.
-                    vToFetch.push_back(pindexWalk);
+                    vToFetch.push_back(pindexWalk);   // hzx 判断本地没有区块,并且也没有向其他人请求区块,则向该节点请求  
                 }
                 pindexWalk = pindexWalk->pprev;
             }
@@ -1759,6 +1765,8 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
                     pindexLast->GetBlockHash().ToString(),
                     pindexLast->nHeight);
             } else {
+
+                // hzx 进入else,说明pindexWalk已经在本地存在,vToFetch中顶多放置16个区块,向peer请求这16个区块即可.
                 std::vector<CInv> vGetData;
                 // Download as much as possible, from earliest to latest.
                 for (const CBlockIndex* pindex : reverse_iterate(vToFetch)) {
@@ -1776,6 +1784,8 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
                     LogPrint(BCLog::NET, "Downloading blocks toward %s (%d) via headers direct fetch\n",
                         pindexLast->GetBlockHash().ToString(), pindexLast->nHeight);
                 }
+
+                // hzx vGetData.size()>1的时候也会进入这个循环,如果对方支持压缩区块发送,告知对方我方期望得到压缩区块发送方式.
                 if (vGetData.size() > 0) {
                     if (nodestate->fSupportsDesiredCmpctVersion && vGetData.size() == 1 && mapBlocksInFlight.size() == 1 && pindexLast->pprev->IsValid(BLOCK_VALID_CHAIN)) {
                         // In any case, we want to download using a compact block, not a regular one
@@ -2456,7 +2466,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         LOCK(cs_main);
-        // 本地节点在下载区块中,并且对方节点不被允许
+        // 本地节点在下载区块中,并且对方节点没权限
         if (::ChainstateActive().IsInitialBlockDownload() && !pfrom->HasPermission(PF_NOBAN)) {
             LogPrint(BCLog::NET, "Ignoring getheaders from peer=%d because node is in initial block download\n", pfrom->GetId());
             return true;
@@ -2954,7 +2964,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
         return true;
     }
-
+    // hzx 这个命令既可以用来传输新区块的区块头,也可以用来同步区块
     if (strCommand == NetMsgType::HEADERS) {
         // Ignore headers received while importing
         if (fImporting || fReindex) {
@@ -2965,6 +2975,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         std::vector<CBlockHeader> headers;
 
         // Bypass the normal CBlock deserialization, as we don't want to risk deserializing 2000 full blocks.
+        // hzx 首先从CDataStream中读取区块数,恶意节点可能发送超过最大量的区块
         unsigned int nCount = ReadCompactSize(vRecv);
         if (nCount > MAX_HEADERS_RESULTS) {
             LOCK(cs_main);
@@ -2976,7 +2987,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             vRecv >> headers[n];
             ReadCompactSize(vRecv); // ignore tx count; assume it is 0.
         }
-
+        // hzx 处理收到的区块头
         return ProcessHeadersMessage(pfrom, connman, headers, chainparams, /*via_compact_block=*/false);
     }
 

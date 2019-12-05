@@ -123,7 +123,7 @@ bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
 size_t nCoinCacheUsage = 5000 * 300;
 uint64_t nPruneTarget = 0;
-int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
+int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;       // hzx 86400,刚好是24小时
 
 uint256 hashAssumeValid;
 arith_uint256 nMinimumChainWork;
@@ -1131,7 +1131,7 @@ bool CChainState::IsInitialBlockDownload() const
         return true;
     if (m_chain.Tip()->nChainWork < nMinimumChainWork)
         return true;
-    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge))
+    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge))       // 目前最新的区块时间戳比当前时间落后24小时,需要进入下载阶段
         return true;
     LogPrintf("Leaving InitialBlockDownload (latching to false)\n");
     m_cached_finished_ibd.store(true, std::memory_order_relaxed);
@@ -3054,7 +3054,7 @@ static bool FindUndoPos(CValidationState& state, int nFile, FlatFilePos& pos, un
 
     return true;
 }
-
+// hzx 这个函数只是检查pow工作量是否合法
 static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true)
 {
     // Check proof of work matches claimed amount
@@ -3342,6 +3342,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     return true;
 }
 
+// hzx 能否接收一个新区块, 实际上传入的是区块头
 bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState& state, const CChainParams& chainparams, CBlockIndex** ppindex)
 {
     AssertLockHeld(cs_main);
@@ -3357,9 +3358,11 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
                 *ppindex = pindex;
             if (pindex->nStatus & BLOCK_FAILED_MASK)
                 return state.Invalid(ValidationInvalidReason::CACHED_INVALID, error("%s: block %s is marked invalid", __func__, hash.ToString()), 0, "duplicate");
+            
+            // hzx 如果区块头已经存在,直接返回true.
             return true;
         }
-
+        // hzx 检查区块合法性,默认checkPow设置为true
         if (!CheckBlockHeader(block, state, chainparams.GetConsensus()))
             return error("%s: Consensus::CheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
@@ -3371,6 +3374,7 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
         pindexPrev = (*mi).second;
         if (pindexPrev->nStatus & BLOCK_FAILED_MASK)
             return state.Invalid(ValidationInvalidReason::BLOCK_INVALID_PREV, error("%s: prev block invalid", __func__), REJECT_INVALID, "bad-prevblk");
+        // hzx 这部分应该是更为详细的检查区块合法性.
         if (!ContextualCheckBlockHeader(block, state, chainparams, pindexPrev, GetAdjustedTime()))
             return error("%s: Consensus::ContextualCheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
@@ -3422,6 +3426,12 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
 }
 
 // Exposed wrapper for AcceptBlockHeader
+/**
+ * 
+ * hzx 处理新收到的区块,headers中的最后一个必然是本地没有的区块
+ * ppindex指的是最后一个合法的pindex索引
+ * first_invalid指第一个非法区块的索引 
+**/
 bool ProcessNewBlockHeaders(const std::vector<CBlockHeader>& headers, CValidationState& state, const CChainParams& chainparams, const CBlockIndex** ppindex, CBlockHeader* first_invalid)
 {
     if (first_invalid != nullptr) first_invalid->SetNull();
