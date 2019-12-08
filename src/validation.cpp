@@ -123,7 +123,7 @@ bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
 size_t nCoinCacheUsage = 5000 * 300;
 uint64_t nPruneTarget = 0;
-int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;       // hzx 86400,刚好是24小时
+int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE; // hzx 86400,刚好是24小时
 
 uint256 hashAssumeValid;
 arith_uint256 nMinimumChainWork;
@@ -1131,7 +1131,7 @@ bool CChainState::IsInitialBlockDownload() const
         return true;
     if (m_chain.Tip()->nChainWork < nMinimumChainWork)
         return true;
-    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge))       // 目前最新的区块时间戳比当前时间落后24小时,需要进入下载阶段
+    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge)) // 目前最新的区块时间戳比当前时间落后24小时,需要进入下载阶段
         return true;
     LogPrintf("Leaving InitialBlockDownload (latching to false)\n");
     m_cached_finished_ibd.store(true, std::memory_order_relaxed);
@@ -3065,7 +3065,7 @@ static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state,
 }
 
 // hzx, 检查一个区块是否合法
-// hzx，　后两个参数默认为ｔｒｕｅ
+// hzx，　后两个参数默认为true
 // 这里对交易的检查只是格式,大小方面检查,具体逻辑上的对错并没有检查.
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot)
 {
@@ -3243,6 +3243,7 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, CValidationSta
         return state.Invalid(ValidationInvalidReason::BLOCK_INVALID_HEADER, false, REJECT_INVALID, "time-too-old", "block's timestamp is too early");
 
     // Check timestamp
+    // hzx 超前当前系统时间2小时拒绝之
     if (block.GetBlockTime() > nAdjustedTime + MAX_FUTURE_BLOCK_TIME)
         return state.Invalid(ValidationInvalidReason::BLOCK_TIME_FUTURE, false, REJECT_INVALID, "time-too-new", "block timestamp too far in the future");
 
@@ -3358,7 +3359,7 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
                 *ppindex = pindex;
             if (pindex->nStatus & BLOCK_FAILED_MASK)
                 return state.Invalid(ValidationInvalidReason::CACHED_INVALID, error("%s: block %s is marked invalid", __func__, hash.ToString()), 0, "duplicate");
-            
+
             // hzx 如果区块头已经存在,直接返回true.
             return true;
         }
@@ -3374,7 +3375,7 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
         pindexPrev = (*mi).second;
         if (pindexPrev->nStatus & BLOCK_FAILED_MASK)
             return state.Invalid(ValidationInvalidReason::BLOCK_INVALID_PREV, error("%s: prev block invalid", __func__), REJECT_INVALID, "bad-prevblk");
-        // hzx 这部分应该是更为详细的检查区块合法性.
+        // hzx 这部分应该是更为详细的检查区块合法性,但是不检查里面交易和utxo集合的冲突
         if (!ContextualCheckBlockHeader(block, state, chainparams, pindexPrev, GetAdjustedTime()))
             return error("%s: Consensus::ContextualCheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
@@ -3406,6 +3407,7 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
                 if (pindexPrev->GetAncestor(failedit->nHeight) == failedit) {
                     assert(failedit->nStatus & BLOCK_FAILED_VALID);
                     CBlockIndex* invalid_walk = pindexPrev;
+                    // hzx 该区块的祖先区块是非法的,将这个区间的区块全部标记为非法.
                     while (invalid_walk != failedit) {
                         invalid_walk->nStatus |= BLOCK_FAILED_CHILD;
                         setDirtyBlockIndex.insert(invalid_walk);
@@ -3416,6 +3418,7 @@ bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState
             }
         }
     }
+    // hzx 新收到的区块,pindex一定为null, 直接插入到 m_block_index中.
     if (pindex == nullptr)
         pindex = AddToBlockIndex(block);
 
@@ -3439,6 +3442,7 @@ bool ProcessNewBlockHeaders(const std::vector<CBlockHeader>& headers, CValidatio
         LOCK(cs_main);
         for (const CBlockHeader& header : headers) {
             CBlockIndex* pindex = nullptr; // Use a temp pindex instead of ppindex to avoid a const_cast
+            // hzx AcceptBlockHeader检测区块头是否合法,合法则将区块头插入 m_block_index中
             bool accepted = g_blockman.AcceptBlockHeader(header, state, chainparams, &pindex);
             ::ChainstateActive().CheckBlockIndex(chainparams.GetConsensus());
 

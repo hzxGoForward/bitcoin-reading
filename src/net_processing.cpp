@@ -594,7 +594,6 @@ static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connma
 }
 
 // hzx 该节点的区块更新是否超时,这个更新法则我没太看懂.
-// hzx consensusParams.nPowTargetSpacing这个干什么用的?
 static bool TipMayBeStale(const Consensus::Params& consensusParams) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     AssertLockHeld(cs_main);
@@ -603,7 +602,7 @@ static bool TipMayBeStale(const Consensus::Params& consensusParams) EXCLUSIVE_LO
     }
     return g_last_tip_update < GetTime() - consensusParams.nPowTargetSpacing * 3 && mapBlocksInFlight.empty();
 }
-
+// hzx nPowTargetSpacing的值为600,即10分钟,如果与对方的时间差在200分钟内,则向对方请求区块
 static bool CanDirectFetch(const Consensus::Params& consensusParams) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     return ::ChainActive().Tip()->GetBlockTime() > GetAdjustedTime() - consensusParams.nPowTargetSpacing * 20;
@@ -1529,9 +1528,7 @@ void static ProcessGetBlockData(CNode* pfrom, const CChainParams& chainparams, c
     }
 }
 
-// hzx  主要用于发送tx
-// hzx  发送block
-// hzx  发送notfound 命令
+// hzx  向peer发送tx block notfound
 void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnman* connman, const std::atomic<bool>& interruptMsgProc) LOCKS_EXCLUDED(cs_main)
 {
     AssertLockNotHeld(cs_main);
@@ -1639,7 +1636,7 @@ inline void static SendBlockTransactions(const CBlock& block, const BlockTransac
     int nSendFlags = State(pfrom->GetId())->fWantsCmpctWitness ? 0 : SERIALIZE_TRANSACTION_NO_WITNESS;
     connman->PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::BLOCKTXN, resp));
 }
-
+// hzx 先判断是不是收到了新的区块,然后再做处理
 bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::vector<CBlockHeader>& headers, const CChainParams& chainparams, bool via_compact_block)
 {
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
@@ -1685,7 +1682,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
         }
 
         uint256 hashLastBlock;
-        // hzx 检查headers是否是连续的,如果发现某些区块前后不连续,直接返回false,不在分析
+        // hzx 检查headers是否是连续的,如果发现某些区块前后不连续,直接返回false,不再分析
         for (const CBlockHeader& header : headers) {
             if (!hashLastBlock.IsNull() && header.hashPrevBlock != hashLastBlock) {
                 Misbehaving(pfrom->GetId(), 20, "non-continuous headers sequence");
@@ -1729,7 +1726,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
         if (received_new_header && pindexLast->nChainWork > ::ChainActive().Tip()->nChainWork) {
             nodestate->m_last_block_announcement = GetTime();
         }
-
+        // hzx 如果直接收到了2000个区块,再次发送GETHEADERS,继续进行同步
         if (nCount == MAX_HEADERS_RESULTS) {
             // Headers message had its maximum size; the peer may have more headers.
             // TODO: optimize: if pindexLast is an ancestor of ::ChainActive().Tip or pindexBestHeader, continue
@@ -1752,7 +1749,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
                     !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
                     (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness)) {
                     // We don't have this block, and it's not yet in flight.
-                    vToFetch.push_back(pindexWalk);   // hzx 判断本地没有区块,并且也没有向其他人请求区块,则向该节点请求  
+                    vToFetch.push_back(pindexWalk); // hzx 判断本地没有区块,并且也没有向其他人请求区块,则向该节点请求
                 }
                 pindexWalk = pindexWalk->pprev;
             }
@@ -1765,7 +1762,6 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
                     pindexLast->GetBlockHash().ToString(),
                     pindexLast->nHeight);
             } else {
-
                 // hzx 进入else,说明pindexWalk已经在本地存在,vToFetch中顶多放置16个区块,向peer请求这16个区块即可.
                 std::vector<CInv> vGetData;
                 // Download as much as possible, from earliest to latest.
@@ -1832,7 +1828,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
     return true;
 }
 
-// 对orphan tx的处理
+// hzx 对orphan tx的处理
 void static ProcessOrphanTx(CConnman* connman, std::set<uint256>& orphan_work_set, std::list<CTransactionRef>& removed_txn) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_cs_orphans)
 {
     AssertLockHeld(cs_main);
@@ -2466,7 +2462,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         LOCK(cs_main);
-        // 本地节点在下载区块中,并且对方节点没权限
+        // hzx 本地节点在下载区块中,并且对方节点没权限
         if (::ChainstateActive().IsInitialBlockDownload() && !pfrom->HasPermission(PF_NOBAN)) {
             LogPrint(BCLog::NET, "Ignoring getheaders from peer=%d because node is in initial block download\n", pfrom->GetId());
             return true;
@@ -2883,7 +2879,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
         }
         return true;
-    }
 
     if (strCommand == NetMsgType::BLOCKTXN) {
         // Ignore blocktxn received while importing
@@ -3721,7 +3716,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             // add all to the inv queue.
             LOCK(pto->cs_inventory);
             std::vector<CBlock> vHeaders;
-            // hzx, the peer no preferHeaders, no preferHeaderAndIDs, noasdf
+            // hzx, the peer no preferHeaders, no preferHeaderAndIDs
             bool fRevertToInv = ((!state.fPreferHeaders &&
                                      (!state.fPreferHeaderAndIDs || pto->vBlockHashesToAnnounce.size() > 1)) ||
                                  pto->vBlockHashesToAnnounce.size() > MAX_BLOCKS_TO_ANNOUNCE);

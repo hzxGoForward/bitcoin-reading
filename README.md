@@ -1,4 +1,4 @@
-Bitcoin Core-reading
+Bitcoin Core-Reading
 =====================================
 
 - 这个Repository没有对Bitcoin Core的逻辑进行修改,而是本人对Bitcoin Core运行过程源代码的阅读理解
@@ -24,21 +24,32 @@ Bitcoin Core-reading
 
 ## Bitcoin中信息发送
 
-假设本地是客户端C, outbound连接peer作为服务器Server,C->S表示客户端向服务器发送信息, S->C表示服务器向客户端发送信息,NetMsgType表示消息的枚举类型.
+Client启动时,如果本地之前存有可以访问的节点, 就通过本地的记录随机选择一些节点作为outbound peer. 否则会通过DNS Seed寻找一些可用的节点作为outbound peer.建立连接的过程是,Client首先向outbound peer发送本方Bitcoin Core的Version, 等待Server的回信. 
+
+Server收到Version信息之后,向Client发送Server的Version信息,并且对Client的Version信息发送VERACK消息表示收到version信息, Client也会向Server发送VERACK消息, 收到VERACK之后,双方都会标记对方的连接状态fSuccessfullyConnected =  true.只有fSucessfullyConnected =  true之后,双方才会发送其他信息.
+
 VERSION消息中更多的内容可以访问 [Bitcoin官网.](https://bitcoin.org/en/developer-reference#version )下面列出消息发送机制,假设刚开始客户端没有当前最新的区块,需要从outbound节点处同步区块.
 
-* C->S: NetMsgType::VERSION, 客户端向服务器发送本机版本号以及其他信息
-* S->C: NetMsgType::VERSION, 服务器向客户端发送服务器版本号
-* S->C: NetMsgType::VERACK,  服务器向客户端发送版本号确认关系
-* S->C: NetMsgType::GETADDR, 服务器向客户端请求客户端告知客户端知道的地址.(前提是,客户端的版本大于CADDR_TIME_VERSION(31402) && 本地已知的地址数量<1000 && 客户端是fOneShot节点)
-* S->C: NetMsgType::PING,    服务器向客户端发送ping信息测试延迟.
-* C->S: NetMsgType::VERACK,  客户端向服务器发送版本号的确认信息
-* S->C:NetMsgType::SENDHEADER_VERSION, 服务器告知客户端, 客户端广播区块的时候,直接使用区块头进行广播, 发送这个信息的前提是, 客户端的版本不小于SENDHEADERS_VERSION(70012)
-* S->C:NetMsgType::SENDCMPCT, 服务器向客户端发送信息,告知客户端服务器支持发送压缩区块,但是前提是,客户端的版本不小于SHORT_IDS_BLOCKS_VERSION(70014)
-* 
+Client和Server的fSuccessfullyConnected = true状态之后, 双方会有一些信息会按照一定的间隔时间进行发送,其中包括ping和Addr信息. ping信息每隔2分钟发送一次,互相发送Ping以检测对方是否离线. 第一次建立连接后双方就会互相发送Ping和Addr消息.
+
+Addr用户互相交换已知的地址信息,Addr的时间间隔为30秒,在client 发送己方的version之后,随之就会向server发送Ping和Server, 而服务器也第一次向客户端发送信息时,也会发送Ping和Server信息.
+
+发送完上述信息之后, 如果client是第一次启动,那么必然会和对方进行区块同步, 此外, 如果检查本地最长的区块的时间和server的时间差, 如果server的时间戳领先client本地最新区块的时间戳,并且领先时间不超过2小时,则进行区块同步.
+
+区块同步的过程,即Client向Server发送GETHEADERS消息, 告知Server已有的最长的一个区块头的哈希值,Server收到后,如果有更多的区块头信息,则会发送给Client.
 
 ## ThreadOpenAddedConnections和ThreadOpenConnections
 - 这两个函数中,看起来ThreadOpenConnections会执行ThreadOpenAddedConnections的功能,为什么还要额外初始化这个函数?
 目前对 ThreadOpenAddedConnections 中功能并未深究.
 
 
+## Bitcoin Core中的一些细节
+### Bitcoin Core中检查一个区块头的合法性的步骤
+- 检查本地是否已经存在该区块头,存在则丢弃
+- 检查区块的工作量是否符合难度需求,如果不符合则丢弃
+- 检查区块的难度值是否正确,不正确则丢弃
+- 检查区块高度低于上一个检查点的高度,如果低于则丢弃
+- 检查区块的时间戳,是否大于过去11个区块的平均时间戳,如果不大于则丢弃
+- 检查区块的时间戳是否超过当前时间2小时,超过则丢弃
+- 检查区块的版本和高度是否符合,不符合则丢弃
+- 检查该区块是否指向一个非法的区块,如果是则丢弃

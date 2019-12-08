@@ -308,7 +308,7 @@ public:
     }
 
     static constexpr int nMedianTimeSpan = 11;
-
+    // hzx 求出过去11个区块的时间戳平均值,返回
     int64_t GetMedianTimePast() const
     {
         int64_t pmedian[nMedianTimeSpan];

@@ -26,8 +26,12 @@ public:
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
     uint32_t nTime;
-    uint32_t nBits;  // nBits用来表示难度,高位的1个字节表示指数(exponent), 低位的三个字节为系数(coefficient)
-    uint32_t nNonce; // target = cofficient * 2 ^(8*(exponent - 3))
+    /**
+     * hzx nBits用来表示难度,高位的1个字节表示指数(exponent), 低位的三个字节为系数(coefficient)
+     * target = cofficient * 2 ^(8*(exponent - 3))
+    */
+    uint32_t nBits;  
+    uint32_t nNonce; 
 
     CBlockHeader()
     {
