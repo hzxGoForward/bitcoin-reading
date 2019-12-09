@@ -8,8 +8,9 @@
 #include <primitives/transaction.h>
 
 
-// hzx 检查一笔交易是否合法
-// hzx 这里只是对格式检查,但是没有交易是否双花或者orphan tx
+/** hzx 检查一笔交易是否合法
+ *  这里只是对格式检查,但是没有交易是否双花或者orphan tx
+*/
 bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fCheckDuplicateInputs)
 {
     // Basic checks that don't depend on any context

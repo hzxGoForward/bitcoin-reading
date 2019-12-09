@@ -2672,6 +2672,7 @@ bool CChainState::ActivateBestChain(CValidationState& state, const CChainParams&
                 ConnectTrace connectTrace(mempool); // Destructed before cs_main is unlocked
 
                 if (pindexMostWork == nullptr) {
+                    // hzx 找到目前最长的合法链
                     pindexMostWork = FindMostWorkChain();
                 }
 
@@ -2966,6 +2967,7 @@ void CChainState::ReceivedBlockTransactions(const CBlock& block, CBlockIndex* pi
                 LOCK(cs_nBlockSequenceId);
                 pindex->nSequenceId = nBlockSequenceId++;
             }
+            // hzx 截止该区块为止的工作量进行比较, 如果大于当前工作量,插入setBlockIndexCandidates中
             if (m_chain.Tip() == nullptr || !setBlockIndexCandidates.value_comp()(pindex, m_chain.Tip())) {
                 setBlockIndexCandidates.insert(pindex);
             }
@@ -3076,7 +3078,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 
     // Check that the header is valid (particularly PoW).  This is mostly
     // redundant with the call in AcceptBlockHeader.
-    // hzx check blockheadder
+    // hzx 检查区块头是否合法
     if (!CheckBlockHeader(block, state, consensusParams, fCheckPOW))
         return false;
 
@@ -3126,6 +3128,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
     if (nSigOps * WITNESS_SCALE_FACTOR > MAX_BLOCK_SIGOPS_COST)
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-blk-sigops", "out-of-bounds SigOpCount");
 
+    // pow和MerkleRoot检测之后,标记fChecked 为true
     if (fCheckPOW && fCheckMerkleRoot)
         block.fChecked = true;
 
@@ -3343,7 +3346,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     return true;
 }
 
-// hzx 能否接收一个新区块, 实际上传入的是区块头
+// hzx 能否接收一个新区块, 如果传入的不是一个blockheader,而是一个block,ppindex指向了该区块所在的CBlockIndex
 bool BlockManager::AcceptBlockHeader(const CBlockHeader& block, CValidationState& state, const CChainParams& chainparams, CBlockIndex** ppindex)
 {
     AssertLockHeld(cs_main);
@@ -3494,7 +3497,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
 
     CBlockIndex* pindexDummy = nullptr;
     CBlockIndex*& pindex = ppindex ? *ppindex : pindexDummy;
-
+    // hzx 使用pindex记录该区块所在的CBlockIndex指针
     bool accepted_header = m_blockman.AcceptBlockHeader(block, state, chainparams, &pindex);
     CheckBlockIndex(chainparams.GetConsensus());
 
@@ -3556,6 +3559,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
             state.Error(strprintf("%s: Failed to find position to write new block to disk", __func__));
             return false;
         }
+        // hzx 接收区块交易
         ReceivedBlockTransactions(block, pindex, blockPos, chainparams.GetConsensus());
     } catch (const std::runtime_error& e) {
         return AbortNode(state, std::string("System error: ") + e.what());
@@ -3585,9 +3589,11 @@ bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<cons
 
         // Ensure that CheckBlock() passes before calling AcceptBlock, as
         // belt-and-suspenders.
+        // hzx 对区块头,merkleRoot检查,检查交易的格式,但是并没有检查交易是否来自合法的utxo或者是否双花.
         bool ret = CheckBlock(*pblock, state, chainparams.GetConsensus());
         if (ret) {
             // Store to disk
+
             ret = ::ChainstateActive().AcceptBlock(pblock, state, chainparams, &pindex, fForceProcessing, nullptr, fNewBlock);
         }
         if (!ret) {
