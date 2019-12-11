@@ -134,7 +134,7 @@ typedef enum ReadStatus_t {
                                    // failure in CheckBlock.
 } ReadStatus;
 
-// 这个结构用来压缩区块,即传输区块的时候直接发送区块头和一部分对等peer可能没有的交易.
+// hzx 这个结构用来压缩区块,即传输区块的时候直接发送区块头和shortTransactionsID
 // 来自bip152
 class CBlockHeaderAndShortTxIDs
 {
@@ -153,7 +153,7 @@ protected:
     std::vector<PrefilledTransaction> prefilledtxn;
 
 public:
-    CBlockHeader header; // 压缩的区块,仍然需包含区块头
+    CBlockHeader header; // hzx 压缩的区块,仍然包含完整的区块头
 
     // Dummy for deserialization
     CBlockHeaderAndShortTxIDs() {}

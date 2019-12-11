@@ -528,6 +528,7 @@ static void ProcessBlockAvailability(NodeId nodeid) EXCLUSIVE_LOCKS_REQUIRED(cs_
 }
 
 /** Update tracking information about which blocks a peer is assumed to have. */
+// hzx 如果一个节点发送了一个区块的INV信息,表示该节点拥有了该区块,我方节点转发时直接跳过.
 static void UpdateBlockAvailability(NodeId nodeid, const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     CNodeState* state = State(nodeid);
@@ -609,7 +610,11 @@ static bool CanDirectFetch(const Consensus::Params& consensusParams) EXCLUSIVE_L
     return ::ChainActive().Tip()->GetBlockTime() > GetAdjustedTime() - consensusParams.nPowTargetSpacing * 20;
 }
 
-// hzx, 判断peer wheter have this block
+/**
+ * hzx, 判断peer wheter have this block
+ * 如果BestKnown是这个区块,返回true
+ * 如果之前发送过,返回true
+ * */
 static bool PeerHasHeader(CNodeState* state, const CBlockIndex* pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     if (state->pindexBestKnownBlock && pindex == state->pindexBestKnownBlock->GetAncestor(pindex->nHeight))
@@ -754,7 +759,7 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     std::chrono::microseconds process_time;
     const auto last_request_time = GetTxRequestTime(txid);
     // First time requesting this tx
-    // hzx 如果从来没有要求过这个tx, 则直接ask
+    // hzx 如果从来没有请求过这个tx, 则直接ask
     if (last_request_time.count() == 0) {
         process_time = current_time;
     } else {
@@ -1193,6 +1198,7 @@ static bool fWitnessesPresentInMostRecentCompactBlock GUARDED_BY(cs_most_recent_
  * Maintain state about the best-seen block and fast-announce a compact block
  * to compatible peers.
  */
+// hzx 直接向其他节点发送压缩后的区块
 void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex* pindex, const std::shared_ptr<const CBlock>& pblock)
 {
     std::shared_ptr<const CBlockHeaderAndShortTxIDs> pcmpctblock = std::make_shared<const CBlockHeaderAndShortTxIDs>(*pblock, true);
@@ -1794,6 +1800,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
                 }
 
                 // hzx vGetData.size()==1的时候告知对方我方期望得到压缩区块发送方式.
+                // hzx 如果
                 if (vGetData.size() > 0) {
                     if (nodestate->fSupportsDesiredCmpctVersion && vGetData.size() == 1 && mapBlocksInFlight.size() == 1 && pindexLast->pprev->IsValid(BLOCK_VALID_CHAIN)) {
                         // In any case, we want to download using a compact block, not a regular one
@@ -2316,6 +2323,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     LogPrint(BCLog::NET, "getheaders (%d) %s to peer=%d\n", pindexBestHeader->nHeight, inv.hash.ToString(), pfrom->GetId());
                 }
             } else {
+                // hzx 标记pfrom已经持有这一笔交易.
                 pfrom->AddInventoryKnown(inv);
                 if (fBlocksOnly) {
                     LogPrint(BCLog::NET, "transaction (%s) inv sent in violation of protocol, disconnecting peer=%d\n", inv.hash.ToString(), pfrom->GetId());
@@ -2673,6 +2681,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         return true;
     }
 
+    // hzx 接收cmpct区块的处理方式
     if (strCommand == NetMsgType::CMPCTBLOCK) {
         // Ignore cmpctblock received while importing
         if (fImporting || fReindex) {
@@ -2687,14 +2696,14 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         {
             LOCK(cs_main);
-
+            // hzx 该区块的前一个区块头找不到,先request之前的区块头再说
             if (!LookupBlockIndex(cmpctblock.header.hashPrevBlock)) {
                 // Doesn't connect (or is genesis), instead of DoSing in AcceptBlockHeader, request deeper headers
                 if (!::ChainstateActive().IsInitialBlockDownload())
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexBestHeader), uint256()));
                 return true;
             }
-
+            // hzx 该区块头没找到,表明收到了新区块.
             if (!LookupBlockIndex(cmpctblock.header.GetHash())) {
                 received_new_header = true;
             }
@@ -2741,10 +2750,10 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
             std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator>>::iterator blockInFlightIt = mapBlocksInFlight.find(pindex->GetBlockHash());
             bool fAlreadyInFlight = blockInFlightIt != mapBlocksInFlight.end();
-
+            // hzx 本地已经收到区块,直接跳过
             if (pindex->nStatus & BLOCK_HAVE_DATA) // Nothing to do here
                 return true;
-
+            // hzx 该区块的工作量少于我方最长区块的工作量,继续请求这个区块?
             if (pindex->nChainWork <= ::ChainActive().Tip()->nChainWork || // We know something better
                 pindex->nTx != 0) {                                        // We had this block at some point, but pruned it
                 if (fAlreadyInFlight) {
@@ -2789,6 +2798,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         MarkBlockAsReceived(pindex->GetBlockHash()); // Reset in-flight state in case of whitelist
                         Misbehaving(pfrom->GetId(), 100, strprintf("Peer %d sent us invalid compact block\n", pfrom->GetId()));
                         return true;
+                    // hzx 提取失败则直接请求文件
                     } else if (status == READ_STATUS_FAILED) {
                         // Duplicate txindexes, the block is now in-flight, so just request it
                         std::vector<CInv> vInv(1);
@@ -4098,7 +4108,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             //
             // Message: getdata (non-blocks)
             //
-
+            // hzx 根据INV信息发送请求区块的消息
             // For robustness, expire old requests after a long timeout, so that
             // we can resume downloading transactions from a peer even if they
             // were unresponsive in the past.
@@ -4126,9 +4136,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // processing at a later time, see below)
                 tx_process_time.erase(tx_process_time.begin());
                 CInv inv(MSG_TX | GetFetchFlags(pto), txid);
+                // hzx 再次检查本地是否已经存储这个交易
                 if (!AlreadyHave(inv)) {
                     // If this transaction was last requested more than 1 minute ago,
                     // then request.
+                    // hzx 如果一次都没有请求,会返回{},默认为0,进入if语句
                     const auto last_request_time = GetTxRequestTime(inv.hash);
                     if (last_request_time <= current_time - GETDATA_TX_INTERVAL) { // hzx request一笔交易的间隔超过1分钟,可以再次持续请求
                         LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
