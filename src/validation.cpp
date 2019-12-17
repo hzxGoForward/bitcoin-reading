@@ -60,6 +60,7 @@
 #define MICRO 0.000001
 #define MILLI 0.001
 
+// hzx 两个CBlockIndex工作量比较,这里不比较高度,直接比较工作量,然后比较接收时间
 bool CBlockIndexWorkComparator::operator()(const CBlockIndex* pa, const CBlockIndex* pb) const
 {
     // First sort by most total work, ...
@@ -2914,6 +2915,7 @@ CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block)
         return it->second;
 
     // Construct new block index object
+    // hzx CBlockIndex初始化函数设置pindexNew的 nStatus = 0
     CBlockIndex* pindexNew = new CBlockIndex(block);
     // We assign the sequence id to blocks only when the full data is available,
     // to avoid miners withholding blocks but broadcasting headers, to get a
@@ -2929,6 +2931,7 @@ CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block)
     }
     pindexNew->nTimeMax = (pindexNew->pprev ? std::max(pindexNew->pprev->nTimeMax, pindexNew->nTime) : pindexNew->nTime);
     pindexNew->nChainWork = (pindexNew->pprev ? pindexNew->pprev->nChainWork : 0) + GetBlockProof(*pindexNew);
+    // hzx 将CBlockIndex的nStatus设置为BLOCK_VALID_TREE, 即该区块的前一个hash是找得到的
     pindexNew->RaiseValidity(BLOCK_VALID_TREE);
     if (pindexBestHeader == nullptr || pindexBestHeader->nChainWork < pindexNew->nChainWork)
         pindexBestHeader = pindexNew;
@@ -3607,6 +3610,7 @@ bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<cons
     NotifyHeaderTip();
 
     CValidationState state; // Only used to report errors, not invalidity - ignore it
+    // hzx 激活最长合法连
     if (!::ChainstateActive().ActivateBestChain(state, chainparams, pblock))
         return error("%s: ActivateBestChain failed (%s)", __func__, FormatStateMessage(state));
 
@@ -4600,9 +4604,9 @@ void CChainState::CheckBlockIndex(const Consensus::Params& consensusParams)
     }
 
     assert(forward.size() == m_blockman.m_block_index.size());
-
+    // hzx equal_range返回一个pair对,第一个指向首个不小于key的元素,第二个指向首个大于key的元素.
     std::pair<std::multimap<CBlockIndex*, CBlockIndex*>::iterator, std::multimap<CBlockIndex*, CBlockIndex*>::iterator> rangeGenesis = forward.equal_range(nullptr);
-    CBlockIndex* pindex = rangeGenesis.first->second;
+    CBlockIndex* pindex = rangeGenesis.first->second;       // hzx pindex指向genesisBlock
     rangeGenesis.first++;
     assert(rangeGenesis.first == rangeGenesis.second); // There is only one index entry with parent nullptr.
 
@@ -4702,7 +4706,7 @@ void CChainState::CheckBlockIndex(const Consensus::Params& consensusParams)
             //    tip, and
             //  - we tried switching to that descendant but were missing
             //    data for some intermediate block between m_chain and the
-            //    tip.
+            //    tip.// Build forward-pointing map of the entire block tree.
             // So if this block is itself better than m_chain.Tip() and it wasn't in
             // setBlockIndexCandidates, then it must be in m_blocks_unlinked.
             if (!CBlockIndexWorkComparator()(pindex, m_chain.Tip()) && setBlockIndexCandidates.count(pindex) == 0) {

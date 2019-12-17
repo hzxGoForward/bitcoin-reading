@@ -35,6 +35,10 @@ Client收到INV消息后,检查本地是否已经存储该区块/交易, 如果�
 
 如果Client收到的是Headers, 加入收到的Headers信息只有一个区块,则直接请求对方发送压缩区块, 如果是多个区块头,则立刻请求对方发送区块.
 
+### Bitcoin Core 接收到Block Header的处理过程
+
+需要注意的是,如果受到了某个Block Header,发现这个Header在本地并不存在,但是已经向某个节点发送过GetData命令之后, 新收到相同的Block Header不会再次发送GetHeader,而是等待20分钟,20分钟以后再次发送.
+
 ### Bitcoin Core 接收到新区块的检查过程
 
 当Bitcoin Core收到的消息是Block的时候,表明收到了一个区块.对区块的检查步骤如下:

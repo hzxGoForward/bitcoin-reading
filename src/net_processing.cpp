@@ -246,7 +246,7 @@ struct CNodeState {
     int64_t nStallingSince;
     std::list<QueuedBlock> vBlocksInFlight;
     //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
-    int64_t nDownloadingSince;
+    int64_t nDownloadingSince; // hzx 何时开始下载Block
     int nBlocksInFlight;
     int nBlocksInFlightValidHeaders;
     //! Whether we consider this a preferred download peer.
@@ -470,7 +470,7 @@ static bool MarkBlockAsReceived(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs
         mapBlocksInFlight.erase(itInFlight);
         return true;
     }
-    return false; // hzx 表明没有requested该block
+    return false; // hzx 表明至今还没有向某个peer requested该block
 }
 
 // returns false, still setting pit, if the block was already in flight from the same peer
@@ -498,6 +498,7 @@ static bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const CBlock
     state->nBlocksInFlightValidHeaders += it->fValidatedHeaders;
     if (state->nBlocksInFlight == 1) {
         // We're starting a block download (batch) from this peer.
+        // hzx 标记第一次的区块下载时间
         state->nDownloadingSince = GetTimeMicros();
     }
     if (state->nBlocksInFlightValidHeaders == 1 && pindex != nullptr) {
@@ -1711,6 +1712,7 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
         // If we don't have the last header, then they'll have given us
         // something new (if these headers are valid).
         // hzx 循环走到这一步,说明区块全部是连续的,如果最后一个区块本地没找到,说明收到新的区块
+        // 如果之前已经收到相同的block Header信息, received_new_header 为false
         if (!LookupBlockIndex(hashLastBlock)) {
             received_new_header = true;
         }
@@ -1761,12 +1763,14 @@ bool static ProcessHeadersMessage(CNode* pfrom, CConnman* connman, const std::ve
             const CBlockIndex* pindexWalk = pindexLast;
             // Calculate all the blocks we'd need to switch to pindexLast, up to a limit.
             // hzx vToFetch实际上最多放置16区块.
+            // while pindexWalk 有效 && 本地的vchain中还没有载入 && 下载量不超过16
             while (pindexWalk && !::ChainActive().Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                // 本地没有数据 并且 没有下载
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                     !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
                     (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness)) {
                     // We don't have this block, and it's not yet in flight.
-                    vToFetch.push_back(pindexWalk); // hzx 判断本地没有区块,并且也没有向其他人请求区块,则向该节点请求
+                    vToFetch.push_back(pindexWalk);
                 }
                 pindexWalk = pindexWalk->pprev;
             }
@@ -2566,6 +2570,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (!AlreadyHave(inv) &&
             AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             mempool.check(&::ChainstateActive().CoinsTip());
+            // hzx 转发交易
             RelayTransaction(tx.GetHash(), *connman);
             for (unsigned int i = 0; i < tx.vout.size(); i++) {
                 auto it_by_prev = mapOrphanTransactionsByPrev.find(COutPoint(inv.hash, i));
@@ -2798,7 +2803,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         MarkBlockAsReceived(pindex->GetBlockHash()); // Reset in-flight state in case of whitelist
                         Misbehaving(pfrom->GetId(), 100, strprintf("Peer %d sent us invalid compact block\n", pfrom->GetId()));
                         return true;
-                    // hzx 提取失败则直接请求文件
+                        // hzx 提取失败则直接请求文件
                     } else if (status == READ_STATUS_FAILED) {
                         // Duplicate txindexes, the block is now in-flight, so just request it
                         std::vector<CInv> vInv(1);
@@ -4029,7 +4034,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 pto->fDisconnect = true;
                 return true;
             }
-            // In case there is a block that has been in flight from this peer for 2 + 0.5 * N times the block interval
+            // In case there is a block that has been in flight from this peer for (2 + 0.5 * N) times the block interval
             // (with N the number of peers from which we're downloading validated blocks), disconnect due to timeout.
             // We compensate for other peers to prevent killing off peers due to our own downstream link
             // being saturated. We only count validated in-flight blocks so peers can't advertise non-existing block hashes
@@ -4037,6 +4042,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             if (state.vBlocksInFlight.size() > 0) {
                 QueuedBlock& queuedBlock = state.vBlocksInFlight.front();
                 int nOtherPeersWithValidatedDownloads = nPeersWithValidatedDownloads - (state.nBlocksInFlightValidHeaders > 0);
+                // consensusParams.nPowTargetSpacing 值为600.
                 if (nNow > state.nDownloadingSince + consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER * nOtherPeersWithValidatedDownloads)) {
                     LogPrintf("Timeout downloading block %s from peer=%d, disconnecting\n", queuedBlock.hash.ToString(), pto->GetId());
                     pto->fDisconnect = true;
@@ -4082,7 +4088,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
             //
             // Message: getdata (blocks)
-            //
+            // hzx 向peer发送GetData
             std::vector<CInv> vGetData;
             if (!pto->fClient && ((fFetch && !pto->m_limited_node) || !::ChainstateActive().IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
                 std::vector<const CBlockIndex*> vToDownload;

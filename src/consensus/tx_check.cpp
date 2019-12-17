@@ -35,7 +35,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
     }
 
     // Check for duplicate inputs - note that this check is slow so we skip it in CheckBlock
-    // hzx,用集合验证tx的重复性问题
+    // hzx,用集合验证tx中的input不会出现重复
     if (fCheckDuplicateInputs) {
         std::set<COutPoint> vInOutPoints;
         for (const auto& txin : tx.vin) {
